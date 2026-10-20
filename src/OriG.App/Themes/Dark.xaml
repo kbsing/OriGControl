@@ -5,7 +5,7 @@
 
     <SolidColorBrush x:Key="TextBrush" Color="#F1F3F6" />
     <SolidColorBrush x:Key="SubtleBrush" Color="#C3C8D0" />
-    <SolidColorBrush x:Key="MutedBrush" Color="#98A0AB" />
+    <SolidColorBrush x:Key="MutedBrush" Color="#B4BCC7" />
     <SolidColorBrush x:Key="DividerBrush" Color="#34383F" />
 
     <SolidColorBrush x:Key="AccentBrush" Color="#6E9BFF" />
@@ -35,7 +35,7 @@
     <SolidColorBrush x:Key="BatteryBarLowFillBrush" Color="#7A3B37" />
 
     <!-- 图标 -->
-    <SolidColorBrush x:Key="IconBrush" Color="#98A0AB" />
+    <SolidColorBrush x:Key="IconBrush" Color="#A6AEB9" />
     <SolidColorBrush x:Key="IconSubtleBrush" Color="#C3C8D0" />
     <SolidColorBrush x:Key="CardBorderBrush" Color="#1FFFFFFF" />
 

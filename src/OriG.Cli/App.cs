@@ -29,6 +29,7 @@ internal static class App
                 "probe" => await ProbeAsync(),
                 "query" => await QueryAsync(args),
                 "set" => await SetAsync(args),
+                "find" => await FindAsync(args),
                 "monitor" => await MonitorAsync(args),
                 "watch" => await WatchAsync(args),
                 "raw" => await RawAsync(args),
@@ -232,14 +233,25 @@ internal static class App
 
     private static async Task<int> SetAsync(string[] args)
     {
-        if (args.Length < 3)
+        if (args.Length < 2)
         {
-            Console.WriteLine("用法：origctl set anc <0|1|2|3|16|17>");
-            Console.WriteLine("      origctl set eq  <0..6>");
+            Console.WriteLine("用法：origctl set anc|eq|tone|touch ...");
             return 1;
         }
 
         string what = args[1].ToLowerInvariant();
+        if (what == "touch")
+            return await SetTouchAsync(args);
+
+        if (args.Length < 3)
+        {
+            Console.WriteLine("用法：origctl set anc <0|1|2|3|16|17>");
+            Console.WriteLine("      origctl set eq   <0..6>");
+            Console.WriteLine("      origctl set tone <0..16>");
+            Console.WriteLine("      origctl set touch <left|right> <single|double|triple|long> <action 0..8>");
+            return 1;
+        }
+
         if (!byte.TryParse(args[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out byte value))
         {
             Console.WriteLine($"✗ 无法解析数值：{args[2]}");
@@ -262,8 +274,17 @@ internal static class App
                 frame = FrameCodec.SetEq(value);
                 verifyOp = OpCodes.EqQuery;
                 break;
+            case "tone":
+                if (value > 16)
+                {
+                    Console.WriteLine("? 提示音音量范围为 0..16");
+                    return 1;
+                }
+                frame = FrameCodec.SetToneVolume(value);
+                verifyOp = OpCodes.Query102;
+                break;
             default:
-                Console.WriteLine($"✗ 未知目标：{what}（支持 anc / eq）");
+                Console.WriteLine($"? δ֪Ŀ�꣺{what}��֧�� anc / eq / tone / touch��");
                 return 1;
         }
 
@@ -275,13 +296,141 @@ internal static class App
 
         var state = session.State;
         Console.WriteLine();
-        Console.WriteLine(what == "anc"
-            ? $"  回读降噪 = {state.AncText}"
-            : $"  回读 EQ   = {state.EqText}");
+        Console.WriteLine(what switch
+        {
+            "anc" => $"  回读降噪 = {state.AncText}",
+            "eq" => $"  回读 EQ   = {state.EqText}",
+            "tone" => $"  回读提示音音量 = {(state.Query102?.ToString(CultureInfo.InvariantCulture) ?? "无")}",
+            _ => "",
+        });
 
         if (what == "eq" && value == EqPreset.Game)
             Console.WriteLine($"  注意：EQ 设为「游戏优化」会联动打开游戏模式，当前 = {HeadsetState.Tri(state.GameMode)}");
 
+        return 0;
+    }
+
+    // ----------------------------------------------------------------- touch
+
+    private static async Task<int> SetTouchAsync(string[] args)
+    {
+        if (args.Length < 5)
+        {
+            Console.WriteLine("用法：origctl set touch <left|right> <single|double|triple|long> <action 0..8>");
+            Console.WriteLine("      action：0=无 1=播放/暂停 2=上一曲 3=下一曲 4=降噪切换");
+            Console.WriteLine("              5=音量- 6=音量+ 7=游戏模式 8=语音助手");
+            return 1;
+        }
+
+        if (!TryParseSide(args[2], out byte side))
+        {
+            Console.WriteLine($"? 无法解析耳侧：{args[2]}");
+            return 1;
+        }
+        if (!TryParseGesture(args[3], out byte gesture))
+        {
+            Console.WriteLine($"? 无法解析手势：{args[3]}");
+            return 1;
+        }
+        if (!byte.TryParse(args[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out byte action)
+            || !TouchAction.All.Contains(action))
+        {
+            Console.WriteLine($"? 触控动作需为 0..8：{args[4]}");
+            return 1;
+        }
+
+        await using var session = await OpenTargetAsync(echo: true);
+        if (session is null)
+            return 1;
+
+        session.ClearFrames();
+        await session.SendQueryAsync(OpCodes.ConfigRead);
+        await Task.Delay(400);
+
+        byte enabled = TouchConfig.Find(session.State.ConfigTable, side, gesture)?.Enabled ?? 1;
+        session.ClearFrames();
+        await session.SendAsync(FrameCodec.SetTouchAction(side, gesture, action, enabled),
+            $"{TouchSide.Name(side)} {TouchGesture.Name(gesture)}");
+        await Task.Delay(20);
+        await session.SendQueryAsync(OpCodes.ConfigRead);
+        await Task.Delay(600);
+
+        var binding = TouchConfig.Find(session.State.ConfigTable, side, gesture);
+        Console.WriteLine();
+        if (binding is null)
+        {
+            Console.WriteLine("? 回读未找到该触控项");
+            return 1;
+        }
+
+        Console.WriteLine($"  回读 {TouchSide.Name(side)} {TouchGesture.Name(gesture)} = " +
+                          $"{TouchAction.Name(binding.Value.Action)}（协议 0x{binding.Value.Action:X2}）");
+        return binding.Value.Action == action ? 0 : 1;
+    }
+
+    private static bool TryParseSide(string text, out byte side)
+    {
+        switch (text.ToLowerInvariant())
+        {
+            case "left" or "l" or "1":
+                side = TouchSide.Left;
+                return true;
+            case "right" or "r" or "2":
+                side = TouchSide.Right;
+                return true;
+            default:
+                side = 0;
+                return false;
+        }
+    }
+
+    private static bool TryParseGesture(string text, out byte gesture)
+    {
+        switch (text.ToLowerInvariant())
+        {
+            case "single" or "1":
+                gesture = TouchGesture.Single;
+                return true;
+            case "double" or "2":
+                gesture = TouchGesture.Double;
+                return true;
+            case "triple" or "3":
+                gesture = TouchGesture.Triple;
+                return true;
+            case "long" or "longpress" or "5":
+                gesture = TouchGesture.LongPress;
+                return true;
+            default:
+                gesture = 0;
+                return false;
+        }
+    }
+
+    // ------------------------------------------------------------------ find
+
+    private static async Task<int> FindAsync(string[] args)
+    {
+        bool on;
+        if (args.Length >= 2 && args[1].Equals("on", StringComparison.OrdinalIgnoreCase))
+            on = true;
+        else if (args.Length >= 2 && args[1].Equals("off", StringComparison.OrdinalIgnoreCase))
+            on = false;
+        else
+        {
+            Console.WriteLine("用法：origctl find on|off");
+            Console.WriteLine("      on  = 让耳机响铃（会发出较大提示音）");
+            Console.WriteLine("      off = 停止响铃");
+            return 1;
+        }
+
+        await using var session = await OpenTargetAsync(echo: true);
+        if (session is null)
+            return 1;
+
+        await session.SendAsync(FrameCodec.SetFindEarbuds(on), on ? "查找耳机 开" : "查找耳机 关");
+        await Task.Delay(300);
+
+        Console.WriteLine(on ? "  已发送开始查找指令" : "  已发送停止查找指令");
         return 0;
     }
 
@@ -457,8 +606,12 @@ internal static class App
               origctl scan                        列出已配对设备 + 查找 NHCKCTRL 服务 + 读通道号
               origctl probe                       完整流程：连接 → 握手 → 状态 → 稳定性 → 重连
               origctl query <hex>                 发单条查询        例：origctl query 0005
-              origctl set anc <0|1|2|3|16|17>     设降噪（16/17 = 0x10/0x11）
+              origctl set anc <0|1|2|3|16|17>     设降噪（16=实验性降噪，17=风噪模式）
               origctl set eq  <0..6>              设均衡器
+              origctl set tone <0..16>            设提示音音量
+              origctl set touch <left|right> <single|double|triple|long> <0..8>
+                                                  设触控动作
+              origctl find on|off                 查找耳机（响铃 / 停止）
               origctl monitor [秒]                监听耳机主动上报
               origctl watch [秒] [间隔ms]         轮询并只打印变化的字段
               origctl raw "<hex>"                 发原始帧          例：origctl raw "4E 03 00 00 05 00"

@@ -148,6 +148,15 @@ internal sealed class Session : IAsyncDisposable
             OpCodes.Firmware => $"固件 {f[1]}.{f[0]:00}",
             OpCodes.AncQuery or OpCodes.AncSet => AncMode.Name(f[0]),
             OpCodes.EqQuery or OpCodes.EqSet => EqPreset.Name(f[0]),
+            OpCodes.FindEarbudsSet => f.IsOn(0) ? "开始响铃" : "停止响铃",
+            OpCodes.Query102 or OpCodes.Set202 => $"提示音音量 {f[0]}",
+            OpCodes.ConfigRead => string.Join("；", TouchConfig.Parse(f.Parameters).Select(b =>
+                $"{TouchSide.Name(b.Side)}{TouchGesture.Name(b.Gesture)}={TouchAction.Name(b.Action)}")),
+            OpCodes.ConfigWrite => f.Parameters.Length >= 4
+                ? $"{TouchSide.Name(f[0])}{TouchGesture.Name(f[2])}={TouchAction.Name(f[3])}"
+                : $"ACK {FrameCodec.Hex(f.Parameters)}",
+            OpCodes.Query104 => CodecProtocol.Describe(f[0]),
+            OpCodes.Query10A => TouchConfig.AncCycleText(f.Parameters),
             OpCodes.GameModeQuery or OpCodes.LowLatencyQuery or OpCodes.DualConnQuery
                 or OpCodes.InEarQuery or OpCodes.WindQuery => f.IsOn(0) ? "开" : "关",
             OpCodes.Event204 => $"seq={f[0]}  值=0x{f[6]:X2}",

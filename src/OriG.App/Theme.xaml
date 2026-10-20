@@ -87,6 +87,44 @@
         </Setter>
     </Style>
 
+    <!-- 小号勾选框（触控启用） -->
+    <Style x:Key="MiniCheck" TargetType="CheckBox">
+        <Setter Property="Foreground" Value="{DynamicResource MutedBrush}" />
+        <Setter Property="FontSize" Value="10" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="CheckBox">
+                    <StackPanel Orientation="Horizontal" Background="Transparent">
+                        <Border x:Name="Box" Width="14" Height="14" CornerRadius="4"
+                                BorderBrush="{DynamicResource PopupBorderBrush}" BorderThickness="1.5"
+                                Background="Transparent" VerticalAlignment="Center">
+                            <TextBlock x:Name="Mark" Text="&#xE73E;"
+                                       FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                       FontSize="9" Foreground="#FFFFFF"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       Visibility="Collapsed" />
+                        </Border>
+                        <ContentPresenter Margin="5,0,0,0" VerticalAlignment="Center" />
+                    </StackPanel>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Box" Property="Background" Value="{DynamicResource AccentBrush}" />
+                            <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                            <Setter TargetName="Mark" Property="Visibility" Value="Visible" />
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.45" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- 次要按钮 -->
     <Style x:Key="FlatButton" TargetType="Button">
         <Setter Property="Foreground" Value="{DynamicResource SubtleBrush}" />
@@ -231,6 +269,8 @@
                                             </Grid.ColumnDefinitions>
                                             <ContentPresenter Grid.Column="0" Margin="10,0,2,0"
                                                               VerticalAlignment="Center"
+                                                              TextElement.Foreground="{Binding Foreground,
+                                                                        RelativeSource={RelativeSource AncestorType=ComboBox}}"
                                                               Content="{Binding SelectionBoxItem,
                                                                         RelativeSource={RelativeSource AncestorType=ComboBox}}"
                                                               ContentTemplate="{Binding SelectionBoxItemTemplate,
@@ -364,6 +404,8 @@
 
                                             <ContentPresenter Grid.Column="2" HorizontalAlignment="Right"
                                                               VerticalAlignment="Center"
+                                                              TextElement.Foreground="{Binding Foreground,
+                                                                        RelativeSource={RelativeSource AncestorType=ComboBox}}"
                                                               Content="{Binding SelectionBoxItem,
                                                                         RelativeSource={RelativeSource AncestorType=ComboBox}}" />
 

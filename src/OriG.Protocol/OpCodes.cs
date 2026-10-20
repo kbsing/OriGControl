@@ -39,7 +39,9 @@ public static class OpCodes
     public const ushort GameModeSet = 0x0208;
     public const ushort InEarSet = 0x0209;
     public const ushort WindSet = 0x02E1;
-    public const ushort Set3A2 = 0x03A2;
+
+    /// <summary>查找耳机：SET [01] 开始响铃，[00] 停止。官方 App 的 bt.find_earbuds 指令。</summary>
+    public const ushort FindEarbudsSet = 0x03A2;
 
     /// <summary>
     /// 官方 App 的握手顺序（实测 16 条，间隔约 110ms）。
@@ -61,19 +63,19 @@ public static class OpCodes
         Battery => "电量",
         Query6 => "查询6",
         AncQuery => "降噪状态",
-        Query102 => "查询0x0102",
-        ConfigRead => "配置表读",
-        Query104 => "查询0x0104",
+        Query102 => "提示音音量",
+        ConfigRead => "触控配置",
+        Query104 => "当前编码",
         DualConnQuery => "双设备连接",
         LowLatencyQuery => "低延迟",
         EqQuery => "EQ 状态",
         GameModeQuery => "游戏模式",
         InEarQuery => "入耳检测",
-        Query10A => "查询0x010A",
+        Query10A => "降噪循环",
         WindQuery => "抗风噪",
         AncSet => "设降噪",
-        Set202 => "设0x0202",
-        ConfigWrite => "配置表写",
+        Set202 => "设提示音音量",
+        ConfigWrite => "设触控",
         Event204 => "事件上报",
         LowLatencySet => "设低延迟",
         EqSet => "设 EQ",
@@ -81,20 +83,23 @@ public static class OpCodes
         DualConnSet => "设双设备",
         InEarSet => "设入耳检测",
         WindSet => "设抗风噪",
-        Set3A2 => "设0x03A2",
+        FindEarbudsSet => "查找耳机",
         _ => $"未知 0x{op:X4}",
     };
 }
 
-/// <summary>降噪档位。0x10 / 0x11 实测存在但语义待确认。</summary>
+/// <summary>
+/// 降噪档位。0x10 / 0x11 的语义已由官方 App 反编译确认：
+/// 0x10 = 实验性降噪（更激进的算法，可能异常），0x11 = 风噪模式。
+/// </summary>
 public static class AncMode
 {
     public const byte Off = 0x00;
     public const byte Transparency = 0x01;
     public const byte Normal = 0x02;
     public const byte Deep = 0x03;
-    public const byte Unknown10 = 0x10;
-    public const byte Unknown11 = 0x11;
+    public const byte Experimental = 0x10;
+    public const byte WindNoise = 0x11;
 
     public static string Name(int v) => v switch
     {
@@ -102,13 +107,13 @@ public static class AncMode
         Transparency => "通透",
         Normal => "普通降噪",
         Deep => "深度降噪",
-        Unknown10 => "模式0x10（待定）",
-        Unknown11 => "模式0x11（待定）",
+        Experimental => "实验性降噪",
+        WindNoise => "风噪模式",
         _ => $"未知(0x{v:X2})",
     };
 
-    /// <summary>UI 循环顺序（按官方 App 的降噪环）</summary>
-    public static readonly byte[] Cycle = [Off, Transparency, Unknown11, Deep];
+    /// <summary>UI 循环顺序；风噪模式不参与降噪循环。</summary>
+    public static readonly byte[] Cycle = [Off, Transparency, Normal, Deep];
 }
 
 /// <summary>均衡器预设，7 档全部实测可设。</summary>

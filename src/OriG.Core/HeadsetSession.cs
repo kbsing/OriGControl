@@ -31,7 +31,7 @@ public sealed class HeadsetSession : IAsyncDisposable
     private readonly IHeadsetTransport _transport;
     private readonly StreamDecoder _decoder = new();
     private readonly SemaphoreSlim _writeGate = new(1, 1);
-    private readonly CancellationTokenSource _cts = new();
+    private CancellationTokenSource _cts = new();
 
     private Task? _pump;
     private HeadsetServiceInfo? _service;
@@ -54,6 +54,12 @@ public sealed class HeadsetSession : IAsyncDisposable
     {
         if (Status is SessionStatus.Ready or SessionStatus.Handshaking)
             return true;
+
+        if (_cts.IsCancellationRequested)
+        {
+            _cts.Dispose();
+            _cts = new CancellationTokenSource();
+        }
 
         SetStatus(SessionStatus.Connecting);
 
@@ -78,7 +84,7 @@ public sealed class HeadsetSession : IAsyncDisposable
             DeviceName = _service.DisplayName;
 
             SetStatus(SessionStatus.Handshaking);
-            _pump = PumpAsync();
+            _pump = PumpAsync(_cts.Token);
 
             // 官方 App 的握手序列：16 条，110ms 间隔
             foreach (var op in OpCodes.Handshake)
@@ -134,14 +140,14 @@ public sealed class HeadsetSession : IAsyncDisposable
 
     // ------------------------------------------------------------- 读线程
 
-    private async Task PumpAsync()
+    private async Task PumpAsync(CancellationToken token)
     {
         var buffer = new byte[512];
         try
         {
-            while (!_cts.IsCancellationRequested)
+            while (!token.IsCancellationRequested)
             {
-                int read = await _transport.ReadAsync(buffer, _cts.Token);
+                int read = await _transport.ReadAsync(buffer, token);
                 if (read == 0)
                 {
                     Fail("连接已被耳机断开");
@@ -184,9 +190,65 @@ public sealed class HeadsetSession : IAsyncDisposable
         SetAndVerifyAsync(FrameCodec.SetAnc(mode), OpCodes.AncQuery,
             () => State.Anc == mode, ct);
 
+    /// <summary>
+    /// 查找耳机。0x03A2 只下发、不回读：官方 App 也没有对应的查询指令。
+    /// </summary>
+    public async Task<bool> FindEarbudsAsync(bool on, CancellationToken ct = default)
+    {
+        if (Status != SessionStatus.Ready)
+            return false;
+
+        await _writeGate.WaitAsync(ct);
+        try
+        {
+            await _transport.WriteAsync(FrameCodec.SetFindEarbuds(on), ct);
+            await Task.Delay(20, ct);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Fail($"下发失败：{ex.Message}");
+            return false;
+        }
+        finally
+        {
+            _writeGate.Release();
+        }
+    }
+
     public Task<bool> SetEqAsync(byte preset, CancellationToken ct = default) =>
         SetAndVerifyAsync(FrameCodec.SetEq(preset), OpCodes.EqQuery,
             () => State.Eq == preset, ct);
+
+    public Task<bool> SetToneVolumeAsync(byte volume, CancellationToken ct = default)
+    {
+        if (volume > 16)
+            return Task.FromResult(false);
+
+        return SetAndVerifyAsync(FrameCodec.SetToneVolume(volume), OpCodes.Query102,
+            () => State.Query102 == volume, ct);
+    }
+
+    public Task<bool> SetTouchActionAsync(byte side, byte gesture, byte action, byte enabled = 1,
+        CancellationToken ct = default)
+    {
+        if (side is not (TouchSide.Left or TouchSide.Right)
+            || !TouchGesture.All.Contains(gesture)
+            || !TouchAction.All.Contains(action)
+            || enabled is not (0 or 1))
+        {
+            return Task.FromResult(false);
+        }
+
+        return SetAndVerifyAsync(FrameCodec.SetTouchAction(side, gesture, action, enabled), OpCodes.ConfigRead,
+            () => TouchConfig.Find(State.ConfigTable, side, gesture) is { } binding
+                  && binding.Action == action
+                  && binding.Enabled == enabled, ct);
+    }
 
     public Task<bool> SetToggleAsync(Toggle toggle, bool on, CancellationToken ct = default)
     {

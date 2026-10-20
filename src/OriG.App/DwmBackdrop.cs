@@ -76,30 +76,15 @@ internal static class DwmBackdrop
         DwmSetWindowAttribute(hwnd, DwmwaUseImmersiveDarkMode, ref light, sizeof(int));
     }
 
-    private const uint WdaExcludeFromCapture = 0x00000011;
+    private const uint WdaNone = 0;
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetWindowDisplayAffinity(IntPtr hwnd, uint affinity);
 
-    /// <summary>恢复为可被捕获（自检截图时需要）。</summary>
+    /// <summary>确保窗口可被捕获（自检截图时需要）。</summary>
     public static bool AllowCapture(Window window)
     {
         var hwnd = new WindowInteropHelper(window).Handle;
-        return hwnd != IntPtr.Zero && SetWindowDisplayAffinity(hwnd, 0);
-    }
-
-    /// <summary>
-    /// 让窗口对屏幕捕获不可见（Win10 2004+）。若生效，就能在窗口显示状态下
-    /// 持续抓到它背后的桌面，从而实现实时模糊。
-    /// </summary>
-    public static bool ExcludeFromCapture(Window window)
-    {
-        var hwnd = new WindowInteropHelper(window).Handle;
-        if (hwnd == IntPtr.Zero)
-            return false;
-
-        bool ok = SetWindowDisplayAffinity(hwnd, WdaExcludeFromCapture);
-        Log.Write($"SetWindowDisplayAffinity(EXCLUDEFROMCAPTURE) → {ok}（err={Marshal.GetLastWin32Error()}）");
-        return ok;
+        return hwnd != IntPtr.Zero && SetWindowDisplayAffinity(hwnd, WdaNone);
     }
 }

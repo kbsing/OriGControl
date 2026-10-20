@@ -8,6 +8,8 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Microsoft.Win32;
 using OriG.Core;
+using OriG.Protocol;
+using TouchActionKind = OriG.Protocol.TouchAction;
 
 public partial class SettingsWindow : Window
 {
@@ -15,8 +17,6 @@ public partial class SettingsWindow : Window
     private readonly HeadsetSession _session;
 
     private bool _loading;
-    private bool _captureExcluded;
-    private LiveBackdrop? _backdrop;
     private DateTime _shownAt = DateTime.MinValue;
 
     public event EventHandler? HotkeysChanged;
@@ -30,6 +30,16 @@ public partial class SettingsWindow : Window
     {
         Interval = TimeSpan.FromMilliseconds(400),
     };
+
+    private readonly System.Windows.Threading.DispatcherTimer _toneTimer = new()
+    {
+        Interval = TimeSpan.FromMilliseconds(350),
+    };
+
+    private readonly Dictionary<ComboBox, (byte Side, byte Gesture)> _touchBoxes = [];
+    private readonly Dictionary<CheckBox, (byte Side, byte Gesture)> _touchEnableBoxes = [];
+    private bool _toneBusy;
+    private int _pendingTone;
 
     public bool HasBackgroundImage =>
         !string.IsNullOrWhiteSpace(_settings.BackgroundImagePath)
@@ -51,27 +61,272 @@ public partial class SettingsWindow : Window
             _settings.Save();
         };
 
+        _toneTimer.Tick += async (_, _) =>
+        {
+            _toneTimer.Stop();
+            await SendToneVolumeAsync();
+        };
+
+        BuildTouchEditor();
         LoadValues();
+        ApplyHeadsetState();
+
+        _session.StateChanged += Session_StateChanged;
+        _session.StatusChanged += Session_StatusChanged;
+        Closed += (_, _) =>
+        {
+            _session.StateChanged -= Session_StateChanged;
+            _session.StatusChanged -= Session_StatusChanged;
+            _toneTimer.Stop();
+        };
+    }
+
+    private void BuildTouchEditor()
+    {
+        var comboStyle = (Style)FindResource("Combo");
+        var bodyStyle = (Style)FindResource("BodyText");
+
+        TouchGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(44) });
+        for (int i = 0; i < TouchGesture.All.Length; i++)
+            TouchGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        TouchGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        TouchGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        TouchGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        for (int i = 0; i < TouchGesture.All.Length; i++)
+        {
+            var header = new TextBlock
+            {
+                Text = TouchGesture.Name(TouchGesture.All[i]),
+                FontSize = 10.5,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, 0, 0, 4),
+            };
+            header.SetResourceReference(TextBlock.ForegroundProperty, "MutedBrush");
+            Grid.SetColumn(header, i + 1);
+            Grid.SetRow(header, 0);
+            TouchGrid.Children.Add(header);
+        }
+
+        byte[] sides = [TouchSide.Left, TouchSide.Right];
+        for (int row = 0; row < sides.Length; row++)
+        {
+            byte side = sides[row];
+            var sideLabel = new TextBlock
+            {
+                Text = TouchSide.Name(side),
+                Style = bodyStyle,
+                FontSize = 12,
+            };
+            Grid.SetColumn(sideLabel, 0);
+            Grid.SetRow(sideLabel, row + 1);
+            TouchGrid.Children.Add(sideLabel);
+
+            for (int column = 0; column < TouchGesture.All.Length; column++)
+            {
+                byte gesture = TouchGesture.All[column];
+                var combo = new ComboBox
+                {
+                    Style = comboStyle,
+                    Margin = new Thickness(3),
+                    MinWidth = 78,
+                    Tag = (side, gesture),
+                };
+
+                foreach (byte action in TouchActionKind.All)
+                    combo.Items.Add(new ComboBoxItem { Content = TouchActionKind.Name(action), Tag = action });
+
+                combo.SelectionChanged += Touch_SelectionChanged;
+                _touchBoxes[combo] = (side, gesture);
+
+                var enable = new CheckBox
+                {
+                    Style = (Style)FindResource("MiniCheck"),
+                    Content = "启用",
+                    Margin = new Thickness(5, 2, 0, 2),
+                    Tag = (side, gesture),
+                    IsChecked = true,
+                };
+                enable.Checked += TouchEnable_Changed;
+                enable.Unchecked += TouchEnable_Changed;
+                _touchEnableBoxes[enable] = (side, gesture);
+
+                var cell = new StackPanel();
+                cell.Children.Add(combo);
+                cell.Children.Add(enable);
+
+                Grid.SetColumn(cell, column + 1);
+                Grid.SetRow(cell, row + 1);
+                TouchGrid.Children.Add(cell);
+            }
+        }
+    }
+
+    private void Session_StateChanged(object? sender, EventArgs e) =>
+        Dispatcher.BeginInvoke(ApplyHeadsetState);
+
+    private void Session_StatusChanged(object? sender, EventArgs e) =>
+        Dispatcher.BeginInvoke(ApplyHeadsetState);
+
+    private void ApplyHeadsetState()
+    {
+        var state = _session.State;
+        bool ready = _session.Status == SessionStatus.Ready;
+        HeadsetPanel.IsEnabled = ready;
+        TouchGrid.IsEnabled = ready;
+
+        _loading = true;
+        try
+        {
+            if (!_toneBusy && !_toneTimer.IsEnabled)
+            {
+                if (state.Query102 is int volume)
+                {
+                    ToneSlider.Value = Math.Clamp(volume, 0, 16);
+                    ToneValueText.Text = volume.ToString();
+                    _pendingTone = volume;
+                }
+                else
+                {
+                    ToneValueText.Text = "未读取";
+                }
+            }
+
+            CodecValueText.Text = CodecProtocol.Describe(state.Query104);
+            TouchCycleText.Text = $"降噪循环：{TouchConfig.AncCycleText(state.Query10A)}";
+
+            if (!ready)
+            {
+                HeadsetHintText.Text = "耳机未连接";
+                return;
+            }
+
+            if (HeadsetHintText.Text == "耳机未连接")
+                HeadsetHintText.Text = "";
+
+            foreach (var (combo, cell) in _touchBoxes)
+            {
+                var binding = TouchConfig.Find(state.ConfigTable, cell.Side, cell.Gesture);
+                int action = binding?.Action ?? -1;
+                ComboBoxItem? match = null;
+                foreach (ComboBoxItem item in combo.Items)
+                {
+                    if (item.Tag is byte value && value == action)
+                    {
+                        match = item;
+                        break;
+                    }
+                }
+                combo.SelectedItem = match;
+                combo.ToolTip = binding is null
+                    ? "未读取该触控项"
+                    : $"协议值：{binding.Value.Side:X2} {binding.Value.Enabled:X2} {binding.Value.Gesture:X2} {binding.Value.Action:X2}";
+            }
+
+            foreach (var (box, cell) in _touchEnableBoxes)
+            {
+                var binding = TouchConfig.Find(state.ConfigTable, cell.Side, cell.Gesture);
+                box.IsEnabled = binding is not null;
+                box.IsChecked = binding is { Enabled: 1 };
+            }
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void Tone_Changed(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        int value = (int)Math.Round(e.NewValue);
+        ToneValueText.Text = value.ToString();
+
+        if (_loading)
+            return;
+
+        _pendingTone = value;
+        _toneTimer.Stop();
+        _toneTimer.Start();
+    }
+
+    private async Task SendToneVolumeAsync()
+    {
+        if (_toneBusy || _session.Status != SessionStatus.Ready)
+            return;
+
+        _toneBusy = true;
+        ToneSlider.IsEnabled = false;
+        bool ok;
+        try
+        {
+            ok = await _session.SetToneVolumeAsync((byte)_pendingTone);
+            HeadsetHintText.Text = ok ? "" : "耳机未确认提示音音量";
+        }
+        finally
+        {
+            _toneBusy = false;
+            ToneSlider.IsEnabled = _session.Status == SessionStatus.Ready;
+        }
+
+        if (!ok)
+            ApplyHeadsetState();
+    }
+
+    private async void Touch_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loading
+            || sender is not ComboBox { Tag: ValueTuple<byte, byte> cell, SelectedItem: ComboBoxItem { Tag: byte action } })
+        {
+            return;
+        }
+
+        TouchGrid.IsEnabled = false;
+        try
+        {
+            byte enabled = TouchConfig.Find(_session.State.ConfigTable, cell.Item1, cell.Item2)?.Enabled ?? 1;
+            bool ok = await _session.SetTouchActionAsync(cell.Item1, cell.Item2, action, enabled);
+            HeadsetHintText.Text = ok ? "" : "耳机未确认触控设置";
+            if (!ok)
+                ApplyHeadsetState();
+        }
+        finally
+        {
+            TouchGrid.IsEnabled = _session.Status == SessionStatus.Ready;
+        }
+    }
+
+    private async void TouchEnable_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_loading
+            || sender is not CheckBox { Tag: ValueTuple<byte, byte> cell } box)
+        {
+            return;
+        }
+
+        var binding = TouchConfig.Find(_session.State.ConfigTable, cell.Item1, cell.Item2);
+        if (binding is null)
+            return;
+
+        byte enabled = (byte)(box.IsChecked == true ? 1 : 0);
+        TouchGrid.IsEnabled = false;
+        try
+        {
+            bool ok = await _session.SetTouchActionAsync(
+                cell.Item1, cell.Item2, binding.Value.Action, enabled);
+            HeadsetHintText.Text = ok ? "" : "耳机未确认触控设置";
+            if (!ok)
+                ApplyHeadsetState();
+        }
+        finally
+        {
+            TouchGrid.IsEnabled = _session.Status == SessionStatus.Ready;
+        }
     }
 
     private void ApplyMaterial()
     {
         DwmBackdrop.UseLightFrame(this);
         DwmBackdrop.EnableRoundedCorners(this);
-    }
-
-    /// <summary>只有「实时模糊」才需要让窗口对捕获隐身。</summary>
-    private void ApplyCapturePolicyBeforeShow()
-    {
-        if (_settings.LiveBlur && !HasBackgroundImage)
-        {
-            _captureExcluded = DwmBackdrop.ExcludeFromCapture(this);
-        }
-        else
-        {
-            DwmBackdrop.AllowCapture(this);
-            _captureExcluded = false;
-        }
     }
 
     private bool IsDark => _settings.Theme == AppTheme.Dark;
@@ -108,6 +363,7 @@ public partial class SettingsWindow : Window
                 ThresholdBox.SelectedIndex = 1;
 
             ThresholdBox.IsEnabled = _settings.LowBatteryNotify;
+            SelectIdleDisconnect(_settings.IdleDisconnectMinutes);
             RingChip.IsChecked = _settings.BatteryStyle == BatteryStyle.Ring;
             BarChip.IsChecked = _settings.BatteryStyle == BatteryStyle.Bar;
 
@@ -116,7 +372,6 @@ public partial class SettingsWindow : Window
             BlurSlider.Value = Math.Clamp(_settings.BlurRadius, BlurSlider.Minimum, BlurSlider.Maximum);
             BlurValueText.Text = ((int)BlurSlider.Value).ToString();
 
-            LiveBlurBox.IsChecked = _settings.LiveBlur;
             LightChip.IsChecked = _settings.Theme == AppTheme.Light;
             DarkChip.IsChecked = _settings.Theme == AppTheme.Dark;
         }
@@ -143,18 +398,6 @@ public partial class SettingsWindow : Window
         BlurChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    private void LiveBlur_Changed(object sender, RoutedEventArgs e)
-    {
-        if (_loading)
-            return;
-
-        _settings.LiveBlur = LiveBlurBox.IsChecked == true;
-        _settings.Save();
-        RefreshBackdropNow();
-        AppearanceChanged?.Invoke(this, EventArgs.Empty);
-        Log.Write($"实时模糊 → {_settings.LiveBlur}");
-    }
-
     private void Theme_Checked(object sender, RoutedEventArgs e)
     {
         if (_loading)
@@ -171,12 +414,13 @@ public partial class SettingsWindow : Window
     {
         BackgroundImageText.Text = HasBackgroundImage
             ? System.IO.Path.GetFileName(_settings.BackgroundImagePath)
-            : "未设置（使用实时模糊）";
+            : "未设置";
     }
 
     public void ShowNear(Window owner)
     {
         SizeToContent = SizeToContent.Manual;
+        ContentScroller.MaxHeight = Math.Max(320, SystemParameters.WorkArea.Height - 40);
         RootGrid.Measure(new Size(Width, double.PositiveInfinity));
         double contentHeight = RootGrid.DesiredSize.Height;
         if (contentHeight < 40)
@@ -193,73 +437,36 @@ public partial class SettingsWindow : Window
         bool imageMode = HasBackgroundImage
             && FrostedBackdrop.ApplyImage(BackdropImage, _settings.BackgroundImagePath, Width, contentHeight, _settings.BlurRadius);
 
-        bool wantBlur = !imageMode && _settings.LiveBlur;
-        bool liveBlur = wantBlur && _captureExcluded;
-
-        if (wantBlur && !_captureExcluded)
-        {
-            double scale = FrostedBackdrop.GetScale(this);
-            FrostedBackdrop.Capture(this, BackdropImage, Width, contentHeight, scale, _settings.BlurRadius);
-        }
-
-        bool hasBackdrop = imageMode || wantBlur;
-        if (!hasBackdrop)
-        {
-            _backdrop?.Stop();
+        if (!imageMode)
             BackdropImage.Source = null;
-        }
 
-        RootCard.Background = CardScrim(hasBackdrop);
-
-        ApplyCapturePolicyBeforeShow();
+        RootCard.Background = CardScrim(imageMode);
 
         Opacity = 1;
         Show();
 
-        if (liveBlur)
-        {
-            _backdrop ??= new LiveBackdrop(this, BackdropImage);
-            _backdrop.Start(Width, contentHeight, _settings.BlurRadius);
-        }
-        else
-        {
-            _backdrop?.Stop();
-        }
+        // 测量时内容还没溢出，滚动条出现后需要重新量一次宽度，否则右侧会被裁掉
+        ContentScroller.InvalidateMeasure();
+        UpdateLayout();
 
         _shownAt = DateTime.UtcNow;
         Activate();
     }
 
-    /// <summary>只刷新自身背景的视觉，不改抓屏策略（那会破坏合成表面）。</summary>
+    /// <summary>只刷新自身背景的视觉。</summary>
     private void RefreshBackdropNow()
     {
         bool imageMode = HasBackgroundImage
             && FrostedBackdrop.ApplyImage(BackdropImage, _settings.BackgroundImagePath, Width, ActualHeight, _settings.BlurRadius);
 
-        bool wantBlur = !imageMode && _settings.LiveBlur;
-
-        if (!imageMode && !wantBlur)
-        {
-            _backdrop?.Stop();
+        if (!imageMode)
             BackdropImage.Source = null;
-        }
 
-        RootCard.Background = CardScrim(imageMode || wantBlur);
-
-        if (wantBlur && _captureExcluded && IsVisible)
-        {
-            _backdrop ??= new LiveBackdrop(this, BackdropImage);
-            _backdrop.Start(Width, ActualHeight, _settings.BlurRadius);
-        }
-        else
-        {
-            _backdrop?.Stop();
-        }
+        RootCard.Background = CardScrim(imageMode);
     }
 
     private void HidePanel()
     {
-        _backdrop?.Stop();
         Hide();
     }
 
@@ -366,6 +573,32 @@ public partial class SettingsWindow : Window
         }
     }
 
+    private void SelectIdleDisconnect(int minutes)
+    {
+        foreach (ComboBoxItem item in IdleDisconnectBox.Items)
+        {
+            if (item.Tag is string tag && int.TryParse(tag, out int value) && value == minutes)
+            {
+                IdleDisconnectBox.SelectedItem = item;
+                return;
+            }
+        }
+        if (IdleDisconnectBox.Items.Count > 0)
+            IdleDisconnectBox.SelectedIndex = 1;
+    }
+
+    private void IdleDisconnect_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loading || IdleDisconnectBox.SelectedItem is not ComboBoxItem item)
+            return;
+
+        if (item.Tag is string tag && int.TryParse(tag, out int value))
+        {
+            _settings.IdleDisconnectMinutes = value;
+            _settings.Save();
+        }
+    }
+
     private void BatteryStyle_Checked(object sender, RoutedEventArgs e)    {
         if (_loading)
             return;
@@ -404,7 +637,7 @@ public partial class SettingsWindow : Window
         UpdateBackgroundText();
         RefreshBackdropNow();
         AppearanceChanged?.Invoke(this, EventArgs.Empty);
-        Log.Write("清除背景图片，回到实时模糊");
+        Log.Write("清除背景图片，卡片改为纯色底");
     }
 
     private void OpenLog_Click(object sender, RoutedEventArgs e)

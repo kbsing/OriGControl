@@ -54,17 +54,14 @@
                         </StackPanel>
                     </StackPanel>
 
-                    <Button x:Name="BatteryStyleButton" Grid.Column="2"
+                    <Button x:Name="CloseButton" Grid.Column="2"
                             Style="{StaticResource IconButton}"
-                            Click="BatteryStyle_Click" VerticalAlignment="Top"
-                            ToolTip="切换电量显示样式（圆环 / 电池）">
-                        <Grid Width="17" Height="17">
-                            <Ellipse x:Name="StyleIconRing" Width="14" Height="14"
-                                     Stroke="{DynamicResource MutedBrush}" StrokeThickness="2" />
-                            <Border x:Name="StyleIconBar" Width="15" Height="9"
-                                    CornerRadius="2" BorderBrush="{DynamicResource MutedBrush}"
-                                    BorderThickness="1.5" Visibility="Collapsed" />
-                        </Grid>
+                            Click="Close_Click" VerticalAlignment="Top"
+                            ToolTip="关闭面板">
+                        <TextBlock Text="&#xE8BB;"
+                                   FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                   FontSize="14" Foreground="{DynamicResource IconBrush}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Button>
                 </Grid>
 
@@ -74,7 +71,7 @@
 
                 <!-- 降噪分段 -->
                 <Border Background="{DynamicResource SegBgBrush}" CornerRadius="16" Padding="5">
-                    <UniformGrid x:Name="AncPanel" Columns="4" />
+                    <UniformGrid x:Name="AncPanel" Columns="5" />
                 </Border>
 
                 <!-- 均衡器行 -->
@@ -85,6 +82,20 @@
 
                 <!-- 开关 -->
                 <StackPanel x:Name="TogglePanel" />
+
+                <!-- 查找耳机 -->
+                <Button x:Name="FindEarbudsButton" Style="{StaticResource Pill}"
+                        Margin="0,0,0,10" Click="FindEarbuds_Click"
+                        ToolTip="让耳机发出提示音，便于寻找">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE721;"
+                                   FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                   FontSize="16" Foreground="{DynamicResource SubtleBrush}" VerticalAlignment="Center" />
+                        <TextBlock x:Name="FindEarbudsText" Text="查找耳机" FontSize="14"
+                                   Foreground="{DynamicResource SubtleBrush}"
+                                   VerticalAlignment="Center" Margin="8,0,0,0" />
+                    </StackPanel>
+                </Button>
 
                 <Border Height="1" Background="{DynamicResource DividerBrush}" Margin="0,2,0,12" />
 

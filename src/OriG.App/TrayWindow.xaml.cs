@@ -19,6 +19,16 @@ public partial class TrayWindow : Window
         (AncMode.Deep, "深度降噪"),
     ];
 
+    /// <summary>面板上显示的降噪档位；实验性降噪只在这里出现，不进入热键循环。</summary>
+    private static readonly (byte Mode, string Name, int Glyph)[] AncUiItems =
+    [
+        (AncMode.Off, "关闭", 0xE74F),
+        (AncMode.Transparency, "通透", 0xE767),
+        (AncMode.Normal, "普通降噪", 0xE93E),
+        (AncMode.Deep, "深度降噪", 0xE9D9),
+        (AncMode.Experimental, "实验降噪", 0xE9D9),
+    ];
+
     private static readonly (byte Preset, string Name)[] EqItems =
     [
         (EqPreset.Blue, "悔恨之泪"),
@@ -29,12 +39,6 @@ public partial class TrayWindow : Window
         (EqPreset.Fine, "细腻佳音"),
         (EqPreset.Vocal, "温婉人声"),
     ];
-
-    /// <summary>
-    /// 降噪四档图标，取自 Segoe Fluent Icons（Win11 自带图标字体）：
-    /// E74F 静音 / E767 扬声器 / E93E 声波 / E9D9 波形框。
-    /// </summary>
-    private static readonly int[] AncGlyphs = [0xE74F, 0xE767, 0xE93E, 0xE9D9];
 
     /// <summary>Win11 自带图标字体，Win10 上回退到 Segoe MDL2 Assets。</summary>
     private static readonly FontFamily GlyphFont = new("Segoe Fluent Icons, Segoe MDL2 Assets");
@@ -58,11 +62,16 @@ public partial class TrayWindow : Window
 
     private int _ancInFlight;
     private int _eqInFlight;
+    private bool _finding;
+    private System.Windows.Threading.DispatcherTimer? _findTimer;
     private bool _suppress;
     private bool _busy;
-    private bool _captureExcluded;
-    private LiveBackdrop? _backdrop;
     private DateTime _shownAt = DateTime.MinValue;
+    private readonly System.Windows.Threading.DispatcherTimer _reconnectTimer = new();
+    private readonly System.Windows.Threading.DispatcherTimer _idleTimer = new();
+    private int _reconnectAttempt;
+    private bool _idleDisconnected;
+    private HudWindow? _hud;
     private (int Left, int Right, BatteryStyle Style)? _lastBattery;
     private SettingsWindow? _settingsWindow;
 
@@ -81,8 +90,10 @@ public partial class TrayWindow : Window
         _session.StateChanged += (_, _) => Dispatcher.BeginInvoke(ApplyState);
         _session.StatusChanged += (_, _) => Dispatcher.BeginInvoke(ApplyStatus);
 
+        _reconnectTimer.Tick += ReconnectTimer_Tick;
+        _idleTimer.Tick += IdleTimer_Tick;
+
         ApplyStatus();
-        UpdateBatteryStyleIcon();
     }
 
     // ------------------------------------------------------------- 外观
@@ -91,30 +102,11 @@ public partial class TrayWindow : Window
     {
         DwmBackdrop.UseLightFrame(this);
         DwmBackdrop.EnableRoundedCorners(this);
-        ApplyCapturePolicy();
-    }
-
-    /// <summary>抓屏策略：只有「实时模糊」才需要让窗口对捕获隐身。</summary>
-    private void ApplyCapturePolicy()
-    {
-        bool needLiveCapture = _settings.LiveBlur && !HasBackgroundImage;
-
-        if (needLiveCapture)
-        {
-            _captureExcluded = DwmBackdrop.ExcludeFromCapture(this);
-            if (!_captureExcluded)
-                Log.Write("窗口无法从抓屏排除，退回静态背景");
-        }
-        else
-        {
-            DwmBackdrop.AllowCapture(this);
-            _captureExcluded = false;
-        }
     }
 
     private bool IsDark => _settings.Theme == AppTheme.Dark;
 
-    /// <summary>卡片底色：有背景（图片/实时模糊）时半透明，纯色模式下不透明。</summary>
+    /// <summary>卡片底色：有背景图时半透明，纯色模式下不透明。</summary>
     private Brush CardScrim(bool hasBackdrop)
     {
         Color color = (hasBackdrop, IsDark) switch
@@ -140,19 +132,7 @@ public partial class TrayWindow : Window
     /// <summary>设置页改了外观后调用。</summary>
     public void OnAppearanceChanged()
     {
-        bool wasVisible = IsVisible;
-
-        // 关键：SetWindowDisplayAffinity 会重置 DWM 合成表面，在窗口可见时改会导致
-        // 画面残缺（上半部分留鬼影、蒙版消失）。必须先藏起来再改，然后重走显示流程。
-        if (wasVisible)
-        {
-            _backdrop?.Stop();
-            Hide();
-        }
-
-        ApplyCapturePolicy();
-
-        if (wasVisible)
+        if (IsVisible)
             ShowNearTray(activate: false);
     }
 
@@ -163,14 +143,14 @@ public partial class TrayWindow : Window
         var segmentStyle = (Style)FindResource("Segment");
         var switchStyle = (Style)FindResource("Switch");
 
-        for (int i = 0; i < AncItems.Length; i++)
+        for (int i = 0; i < AncUiItems.Length; i++)
         {
-            var (mode, name) = AncItems[i];
+            var (mode, name, glyph) = AncUiItems[i];
 
             // 图标颜色由 RadioButton 的 Foreground 继承（选中变蓝）
             var icon = new TextBlock
             {
-                Text = char.ConvertFromUtf32(AncGlyphs[i]),
+                Text = char.ConvertFromUtf32(glyph),
                 FontFamily = GlyphFont,
                 FontSize = 20,
                 HorizontalAlignment = HorizontalAlignment.Center,
@@ -194,6 +174,8 @@ public partial class TrayWindow : Window
                 Tag = mode,
             };
             segment.Checked += Anc_Checked;
+            if (mode == AncMode.Experimental)
+                segment.ToolTip = "实验性降噪：使用更激进的算法，可能出现声音异常";
             _ancButtons[mode] = segment;
             AncPanel.Children.Add(segment);
         }
@@ -221,6 +203,20 @@ public partial class TrayWindow : Window
 
     public async Task InitializeAsync()
     {
+        await ConnectAsync();
+    }
+
+    /// <summary>闲置断开后，用户再次操作时按需重连。</summary>
+    private async Task EnsureConnectedAsync()
+    {
+        if (IsExiting || ProbeMode || MockReady)
+            return;
+        if (_session.Status is SessionStatus.Ready or SessionStatus.Connecting or SessionStatus.Handshaking)
+            return;
+
+        _idleDisconnected = false;
+        _reconnectAttempt = 0;
+        _reconnectTimer.Stop();
         await ConnectAsync();
     }
 
@@ -256,6 +252,9 @@ public partial class TrayWindow : Window
 
     public void ShowNearTray(bool activate = true)
     {
+        _idleTimer.Stop();
+        _ = EnsureConnectedAsync();
+
         // 1. 不显示窗口，先量出内容高度（Measure 不渲染，不会把自己抓进背景）
         SizeToContent = SizeToContent.Manual;
         RootGrid.Measure(new Size(Width, double.PositiveInfinity));
@@ -269,28 +268,15 @@ public partial class TrayWindow : Window
         Left = area.Right - Width - 12;
         Top = area.Bottom - contentHeight - 12;
 
-        // 3. 背景来源：自定义图片 > 实时模糊 > 静态抓屏兜底 > 纯色
+        // 3. 背景来源：自定义图片 > 纯色
         bool imageMode = HasBackgroundImage
             && FrostedBackdrop.ApplyImage(BackdropImage, _settings.BackgroundImagePath,
                 Width, contentHeight, _settings.BlurRadius);
 
-        bool wantBlur = !imageMode && _settings.LiveBlur;
-        bool liveBlur = wantBlur && _captureExcluded;
-
-        if (wantBlur && !_captureExcluded && !ProbeMode)
-        {
-            double scale = FrostedBackdrop.GetScale(this);
-            FrostedBackdrop.Capture(this, BackdropImage, Width, contentHeight, scale, _settings.BlurRadius);
-        }
-
-        bool hasBackdrop = imageMode || wantBlur;
-        if (!hasBackdrop)
-        {
-            _backdrop?.Stop();
+        if (!imageMode)
             BackdropImage.Source = null;   // 纯色主题：不需要背景图
-        }
 
-        RootCard.Background = CardScrim(hasBackdrop);
+        RootCard.Background = CardScrim(imageMode);
 
         if (ProbeTransparent)
             RootCard.Background = Brushes.Transparent;
@@ -299,17 +285,6 @@ public partial class TrayWindow : Window
         ShowActivated = activate;
         Opacity = 1;
         Show();
-
-        // 5. 实时背景（必须在 Show 之后，窗口可见才抓得到正确的屏幕坐标）
-        if (liveBlur)
-        {
-            _backdrop ??= new LiveBackdrop(this, BackdropImage);
-            _backdrop.Start(Width, contentHeight, _settings.BlurRadius);
-        }
-        else
-        {
-            _backdrop?.Stop();
-        }
 
         _shownAt = DateTime.UtcNow;
 
@@ -322,8 +297,91 @@ public partial class TrayWindow : Window
 
     public void HidePanel()
     {
-        _backdrop?.Stop();
         Hide();
+        if (_settingsWindow is not { IsVisible: true })
+            ArmIdleTimer();
+    }
+
+    // ------------------------------------------------------------- 自动重连 / 闲置断开
+
+    private void ScheduleReconnect()
+    {
+        if (IsExiting || ProbeMode || MockReady || _idleDisconnected)
+            return;
+        if (_session.Status is SessionStatus.Connecting or SessionStatus.Handshaking)
+            return;
+        if (_busy || _reconnectTimer.IsEnabled)
+            return;
+
+        int seconds = Math.Min(30, 3 * (1 << Math.Min(_reconnectAttempt, 4)));
+        _reconnectTimer.Interval = TimeSpan.FromSeconds(seconds);
+        _reconnectTimer.Start();
+
+        if (_reconnectAttempt == 0)
+            HintText.Text = _session.Status == SessionStatus.Faulted
+                ? "连接失败，将自动重试…"
+                : "连接已断开，正在自动重连…";
+    }
+
+    private void ReconnectTimer_Tick(object? sender, EventArgs e)
+    {
+        _reconnectTimer.Stop();
+
+        if (IsExiting || _idleDisconnected || ProbeMode || MockReady)
+            return;
+        if (_session.Status == SessionStatus.Ready)
+        {
+            _reconnectAttempt = 0;
+            return;
+        }
+        if (_busy)
+        {
+            ScheduleReconnect();
+            return;
+        }
+
+        _reconnectAttempt++;
+        Log.Write($"自动重连第 {_reconnectAttempt} 次");
+        _ = ConnectAsync();
+    }
+
+    private void ArmIdleTimer()
+    {
+        _idleTimer.Stop();
+
+        int minutes = _settings.IdleDisconnectMinutes;
+        if (minutes <= 0 || IsExiting || ProbeMode || _session.Status != SessionStatus.Ready)
+            return;
+
+        _idleTimer.Interval = TimeSpan.FromMinutes(minutes);
+        _idleTimer.Start();
+    }
+
+    private async void IdleTimer_Tick(object? sender, EventArgs e)
+    {
+        _idleTimer.Stop();
+
+        if (IsExiting || IsVisible || _settingsWindow is { IsVisible: true })
+            return;
+        if (_session.Status != SessionStatus.Ready)
+            return;
+
+        _idleDisconnected = true;
+        _reconnectTimer.Stop();
+        Log.Write($"闲置 {_settings.IdleDisconnectMinutes} 分钟，断开连接");
+        await _session.DisconnectAsync();
+        HintText.Text = "已闲置断开，打开面板或使用热键会自动重连";
+    }
+
+    /// <summary>系统从休眠唤醒后重新建立链路（空闲断开状态则保持不变）。</summary>
+    public async Task OnResumeAsync()
+    {
+        if (IsExiting || ProbeMode || MockReady || _idleDisconnected)
+            return;
+
+        _idleTimer.Stop();
+        Log.Write("系统唤醒，重新连接");
+        await ReconnectAsync();
     }
 
     /// <summary>自检用：让界面假装已连接，便于评估真实观感。</summary>
@@ -355,9 +413,6 @@ public partial class TrayWindow : Window
 
     /// <summary>自检用：把卡片背景设成全透明，直接暴露底层材质。</summary>
     public bool ProbeTransparent { get; set; }
-
-    /// <summary>自检用：让窗口对抓屏不可见，验证能否抓到背后桌面。</summary>
-    public bool ProbeExclude { get; set; }
 
     public void CaptureScreenTo(string path, bool allowCapture = true)
     {
@@ -420,6 +475,9 @@ public partial class TrayWindow : Window
             _ => (Color.FromRgb(0x9A, 0xA0, 0xA8), "未连接"),
         };
 
+        if (_session.Status == SessionStatus.Ready && _session.State.FirmwareMain >= 0)
+            text = $"已连接 · 固件 {_session.State.FirmwareText}";
+
         StatusDot.Fill = new SolidColorBrush(dot);
         StatusText.Text = text;
 
@@ -431,9 +489,25 @@ public partial class TrayWindow : Window
             StatusText.Text = "已连接";
         }
 
+        if (_session.Status == SessionStatus.Ready)
+        {
+            _reconnectAttempt = 0;
+            _reconnectTimer.Stop();
+            if (!IsVisible && _settingsWindow is not { IsVisible: true })
+                ArmIdleTimer();
+        }
+        else if (_session.Status is SessionStatus.Disconnected or SessionStatus.Faulted)
+        {
+            ScheduleReconnect();
+        }
+
         AncPanel.IsEnabled = ready;
         EqCombo.IsEnabled = ready;
         TogglePanel.IsEnabled = ready;
+        FindEarbudsButton.IsEnabled = ready;
+
+        if (!ready)
+            ResetFindUi();
     }
 
     private void ApplyState()
@@ -441,8 +515,10 @@ public partial class TrayWindow : Window
         var state = _session.State;
 
         DeviceNameText.Text = string.IsNullOrWhiteSpace(_session.DeviceName) ? "原道耳机" : _session.DeviceName;
-        // 固件版本放进悬停提示，保持界面简洁
+        // 固件版本同时显示在状态行，悬停提示保留
         DeviceNameText.ToolTip = state.FirmwareMain < 0 ? null : $"固件 {state.FirmwareText}";
+        if (_session.Status == SessionStatus.Ready && state.FirmwareMain >= 0)
+            StatusText.Text = $"已连接 · 固件 {state.FirmwareText}";
 
         // 电量图形重建有开销，值没变就不动，否则会闪
         var battery = (state.BatteryLeft, state.BatteryRight, _settings.BatteryStyle);
@@ -496,11 +572,26 @@ public partial class TrayWindow : Window
         if (_suppress || sender is not RadioButton { Tag: byte mode })
             return;
 
+        if (mode == AncMode.Experimental)
+        {
+            var choice = MessageBox.Show(this,
+                "实验性降噪使用更激进的降噪算法，可能出现声音异常。\n\n确定要开启吗？",
+                "实验性降噪", MessageBoxButton.YesNo, MessageBoxImage.Warning,
+                MessageBoxResult.No);
+            if (choice != MessageBoxResult.Yes)
+            {
+                ApplyState();
+                return;
+            }
+        }
+
         _ancInFlight++;
         try
         {
             bool ok = await _session.SetAncAsync(mode);
-            HintText.Text = ok ? "" : "耳机未确认该设置";
+            HintText.Text = ok
+                ? (mode == AncMode.Experimental ? "实验性降噪已开启；如声音异常请切回普通降噪" : "")
+                : (mode == AncMode.Experimental ? "耳机未确认该设置，此固件可能不支持实验性降噪" : "耳机未确认该设置");
             Log.Write($"设降噪 0x{mode:X2} → {(ok ? "成功" : "未确认")}");
         }
         finally
@@ -549,27 +640,89 @@ public partial class TrayWindow : Window
         }
     }
 
-    private void BatteryStyle_Click(object sender, RoutedEventArgs e)
+    private async void FindEarbuds_Click(object sender, RoutedEventArgs e)
     {
-        _settings.BatteryStyle = _settings.BatteryStyle == BatteryStyle.Ring ? BatteryStyle.Bar : BatteryStyle.Ring;
-        _settings.Save();
-        RefreshBatteryStyle();
+        if (_session.Status != SessionStatus.Ready)
+            return;
+
+        FindEarbudsButton.IsEnabled = false;
+        try
+        {
+            if (!_finding)
+            {
+                var choice = MessageBox.Show(this,
+                    "此功能会让耳机发出较大的提示音。\n" +
+                    "如果耳机正在您的耳朵里，请不要使用。\n" +
+                    "建议在安全的环境下使用，提示音会持续几秒钟。\n\n" +
+                    "确定要开始寻找耳机吗？",
+                    "查找耳机", MessageBoxButton.YesNo, MessageBoxImage.Warning,
+                    MessageBoxResult.No);
+                if (choice != MessageBoxResult.Yes)
+                    return;
+
+                if (!await _session.FindEarbudsAsync(true))
+                {
+                    HintText.Text = "查找指令发送失败";
+                    return;
+                }
+
+                _finding = true;
+                FindEarbudsText.Text = "停止查找";
+                HintText.Text = "正在寻找耳机…（耳机会发出提示音）";
+                StartFindTimer();
+                Log.Write("查找耳机 → 开始");
+            }
+            else
+            {
+                bool ok = await _session.FindEarbudsAsync(false);
+                ResetFindUi();
+                HintText.Text = ok ? "" : "停止指令发送失败";
+                Log.Write($"查找耳机 → 停止 {(ok ? "成功" : "失败")}");
+            }
+        }
+        finally
+        {
+            FindEarbudsButton.IsEnabled = _session.Status == SessionStatus.Ready;
+        }
+    }
+
+    private void StartFindTimer()
+    {
+        _findTimer?.Stop();
+        _findTimer = new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromSeconds(10),
+        };
+        _findTimer.Tick += async (_, _) =>
+        {
+            _findTimer?.Stop();
+            if (!_finding)
+                return;
+
+            await _session.FindEarbudsAsync(false);
+            ResetFindUi();
+            HintText.Text = "已停止查找";
+            Log.Write("查找耳机 → 自动停止");
+        };
+        _findTimer.Start();
+    }
+
+    private void ResetFindUi()
+    {
+        _findTimer?.Stop();
+        _findTimer = null;
+        _finding = false;
+        FindEarbudsText.Text = "查找耳机";
     }
 
     /// <summary>设置页改了电量样式后调用。</summary>
     public void RefreshBatteryStyle()
     {
-        UpdateBatteryStyleIcon();
         _lastBattery = null;
         ApplyState();
     }
 
-    private void UpdateBatteryStyleIcon()
-    {
-        bool ring = _settings.BatteryStyle == BatteryStyle.Ring;
-        StyleIconRing.Visibility = ring ? Visibility.Visible : Visibility.Collapsed;
-        StyleIconBar.Visibility = ring ? Visibility.Collapsed : Visibility.Visible;
-    }
+    private void Close_Click(object sender, RoutedEventArgs e) => HidePanel();
 
     private async void Reconnect_Click(object sender, RoutedEventArgs e)
     {
@@ -581,6 +734,9 @@ public partial class TrayWindow : Window
 
     public void OpenSettings()
     {
+        _idleTimer.Stop();
+        _ = EnsureConnectedAsync();
+
         if (_settingsWindow is null || !_settingsWindow.IsLoaded)
         {
             _settingsWindow = new SettingsWindow(_settings, _session);
@@ -588,7 +744,12 @@ public partial class TrayWindow : Window
             _settingsWindow.BatteryStyleChanged += (_, _) => RefreshBatteryStyle();
             _settingsWindow.AppearanceChanged += (_, _) => OnAppearanceChanged();
             _settingsWindow.BlurChanged += (_, _) => OnBlurChanged();
-            _settingsWindow.Closed += (_, _) => _settingsWindow = null;
+            _settingsWindow.Closed += (_, _) =>
+            {
+                _settingsWindow = null;
+                if (!IsVisible)
+                    ArmIdleTimer();
+            };
         }
 
         _settingsWindow.ShowNear(this);
@@ -599,6 +760,11 @@ public partial class TrayWindow : Window
 
     public async Task ReconnectAsync()
     {
+        _idleDisconnected = false;
+        _reconnectAttempt = 0;
+        _reconnectTimer.Stop();
+        _idleTimer.Stop();
+
         await Dispatcher.InvokeAsync(async () =>
         {
             await _session.DisconnectAsync();
@@ -611,32 +777,57 @@ public partial class TrayWindow : Window
     /// <summary>循环切降噪（热键用）。</summary>
     public async Task CycleAncAsync()
     {
+        await EnsureConnectedAsync();
         if (_session.Status != SessionStatus.Ready)
             return;
 
         int current = Array.FindIndex(AncItems, x => x.Mode == _session.State.Anc);
         var next = AncItems[(current + 1) % AncItems.Length];
-        await _session.SetAncAsync(next.Mode);
+        bool ok = await _session.SetAncAsync(next.Mode);
         ApplyState();
+        if (ok)
+        {
+            int glyph = Array.Find(AncUiItems, x => x.Mode == next.Mode).Glyph;
+            ShowHud("降噪", next.Name, glyph);
+        }
     }
 
     /// <summary>循环切均衡器（热键用）。</summary>
     public async Task CycleEqAsync()
     {
+        await EnsureConnectedAsync();
         if (_session.Status != SessionStatus.Ready)
             return;
 
         int current = Array.FindIndex(EqItems, x => x.Preset == _session.State.Eq);
         var next = EqItems[(current + 1) % EqItems.Length];
-        await _session.SetEqAsync(next.Preset);
+        bool ok = await _session.SetEqAsync(next.Preset);
         ApplyState();
+        if (ok)
+            ShowHud("均衡器", next.Name, 0xE9E9);
+    }
+
+    private void ShowHud(string title, string value, int glyph)
+    {
+        if (ProbeMode)
+            return;
+
+        _hud ??= new HudWindow();
+        _hud.ShowMessage(title, value, char.ConvertFromUtf32(glyph));
     }
 
     public async Task ShutdownAsync()
     {
         IsExiting = true;
-        _backdrop?.Dispose();
-        _backdrop = null;
+        _reconnectTimer.Stop();
+        _idleTimer.Stop();
+        _hud?.Close();
+        _hud = null;
+        if (_finding)
+        {
+            await _session.FindEarbudsAsync(false);
+            ResetFindUi();
+        }
         if (_settingsWindow is not null)
         {
             _settingsWindow.Close();

@@ -2,6 +2,7 @@ namespace OriG.App;
 
 using System.Threading;
 using System.Windows;
+using Microsoft.Win32;
 using WinForms = System.Windows.Forms;
 
 public partial class App : Application
@@ -39,6 +40,8 @@ public partial class App : Application
         _window.HotkeysChanged += (_, _) => RegisterHotkeys();
         _window.Session.StateChanged += (_, _) => CheckLowBattery();
 
+        SystemEvents.PowerModeChanged += OnPowerModeChanged;
+
         CreateTray();
         RegisterHotkeys();
 
@@ -55,6 +58,10 @@ public partial class App : Application
         if (settingsIndex >= 0 && settingsIndex + 1 < e.Args.Length)
             _ = SnapshotThenExitAsync(e.Args[settingsIndex + 1], settings: true);
 
+        int hudIndex = Array.IndexOf(e.Args, "--snapshot-hud");
+        if (hudIndex >= 0 && hudIndex + 1 < e.Args.Length)
+            _ = SnapshotHudThenExitAsync(e.Args[hudIndex + 1]);
+
         int probeIndex = Array.IndexOf(e.Args, "--probe-backdrop");
         if (probeIndex >= 0 && probeIndex + 1 < e.Args.Length)
             _ = ProbeBackdropThenExitAsync(e.Args[probeIndex + 1], transparent: false);
@@ -62,10 +69,6 @@ public partial class App : Application
         int rawIndex = Array.IndexOf(e.Args, "--probe-raw");
         if (rawIndex >= 0 && rawIndex + 1 < e.Args.Length)
             _ = ProbeBackdropThenExitAsync(e.Args[rawIndex + 1], transparent: true);
-
-        int excludeIndex = Array.IndexOf(e.Args, "--probe-exclude");
-        if (excludeIndex >= 0 && excludeIndex + 1 < e.Args.Length)
-            _ = ProbeExcludeThenExitAsync(e.Args[excludeIndex + 1]);
 
         int plainIndex = Array.IndexOf(e.Args, "--probe-plain");
         if (plainIndex >= 0 && plainIndex + 1 < e.Args.Length)
@@ -217,25 +220,6 @@ public partial class App : Application
         await ExitAsync();
     }
 
-    /// <summary>自检：窗口显示状态下抓屏，看它是否被排除在捕获之外。</summary>
-    private async Task ProbeExcludeThenExitAsync(string path)
-    {
-        await Task.Delay(3500);
-
-        await Dispatcher.InvokeAsync(() =>
-        {
-            _window!.ProbeMode = true;
-            _window.ProbeExclude = true;
-            _window.ShowNearTray();
-        });
-
-        await Task.Delay(1200);
-
-        await Dispatcher.InvokeAsync(() => _window!.CaptureScreenTo(path));
-        await Task.Delay(200);
-        await ExitAsync();
-    }
-
     /// <summary>自检：截取窗口在屏幕上的真实样子，用来确认系统背景材质是否生效。</summary>
     private async Task ProbeBackdropThenExitAsync(string path, bool transparent)
     {
@@ -255,6 +239,36 @@ public partial class App : Application
         await Dispatcher.InvokeAsync(() => _window!.CaptureScreenTo(path));
         await Task.Delay(200);
         await ExitAsync();
+    }
+
+    /// <summary>调试用：渲染切档浮层，然后退出。</summary>
+    private async Task SnapshotHudThenExitAsync(string path)
+    {
+        try
+        {
+            await Task.Delay(500);
+            HudWindow? hud = null;
+            await Dispatcher.InvokeAsync(() =>
+            {
+                hud = new HudWindow();
+                hud.ShowMessage("降噪", "深度降噪", char.ConvertFromUtf32(0xE9D9));
+            });
+            await Task.Delay(400);
+            await Dispatcher.InvokeAsync(() =>
+            {
+                hud!.SaveSnapshot(path);
+                hud.Close();
+            });
+            await Task.Delay(200);
+        }
+        catch (Exception ex)
+        {
+            Log.Write($"浮层快照失败：{ex.GetType().Name}: {ex.Message}");
+        }
+        finally
+        {
+            await ExitAsync();
+        }
     }
 
     /// <summary>调试用：等连接完成后截一张图，然后退出。</summary>
@@ -421,6 +435,20 @@ public partial class App : Application
         Log.Write($"热键 {preferred} 及备选全部不可用");
     }
 
+    // ------------------------------------------------------------- 电源事件
+
+    private void OnPowerModeChanged(object sender, PowerModeChangedEventArgs e)
+    {
+        if (e.Mode != PowerModes.Resume)
+            return;
+
+        Dispatcher.BeginInvoke(async () =>
+        {
+            if (_window is not null)
+                await _window.OnResumeAsync();
+        });
+    }
+
     // ------------------------------------------------------------- 低电量
 
     private void CheckLowBattery()
@@ -480,6 +508,7 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        SystemEvents.PowerModeChanged -= OnPowerModeChanged;
         _tray?.Dispose();
         _hotkeys?.Dispose();
         _mutex?.Dispose();

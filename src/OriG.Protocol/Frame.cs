@@ -44,6 +44,10 @@ public static class FrameCodec
     public static byte[] SetEq(byte preset) => Build(OpCodes.EqSet, preset);
     public static byte[] SetWind(bool on) => Build(OpCodes.WindSet, (byte)(on ? 1 : 0));
     public static byte[] SetLowLatency(bool on) => Build(OpCodes.LowLatencySet, (byte)(on ? 1 : 0));
+    public static byte[] SetFindEarbuds(bool on) => Build(OpCodes.FindEarbudsSet, (byte)(on ? 1 : 0));
+    public static byte[] SetToneVolume(byte volume) => Build(OpCodes.Set202, volume);
+    public static byte[] SetTouchAction(byte side, byte gesture, byte action, byte enabled = 1) =>
+        Build(OpCodes.ConfigWrite, side, enabled, gesture, action);
 
     /// <summary>从 buffer[offset] 起解析一帧。成功返回 true 并给出消耗字节数。</summary>
     public static bool TryParse(ReadOnlySpan<byte> buffer, int offset, out Frame frame, out int consumed)
