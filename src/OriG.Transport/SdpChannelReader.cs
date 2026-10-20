@@ -14,7 +14,7 @@ public static class SdpChannelReader
     {
         try
         {
-            var service = await RfcommDeviceService.FromIdAsync(deviceId);
+            using var service = await RfcommDeviceService.FromIdAsync(deviceId);
             if (service is null)
                 return null;
 

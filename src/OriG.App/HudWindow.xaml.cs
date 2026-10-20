@@ -86,7 +86,7 @@ public partial class HudWindow : Window
         var encoder = new PngBitmapEncoder();
         encoder.Frames.Add(BitmapFrame.Create(bitmap));
 
-        System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
+        System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(path))!);
         using var stream = System.IO.File.Create(path);
         encoder.Save(stream);
     }

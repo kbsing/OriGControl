@@ -44,7 +44,6 @@ public sealed class HeadsetState
     public byte[]? Query10A { get; private set; }
     public int? Query102 { get; private set; }
     public int? Query104 { get; private set; }
-    public int LastEventSeq { get; private set; } = -1;
 
     /// <summary>
     /// 应用一帧，返回状态是否**真的发生变化**。
@@ -52,6 +51,10 @@ public sealed class HeadsetState
     /// </summary>
     public bool Apply(Frame f)
     {
+        // 参数不全的帧直接忽略，否则 f[i] 会返回 -1 把已知状态覆盖成「未知」。
+        if (!HasRequiredParameters(f))
+            return false;
+
         switch (f.OpCode)
         {
             case OpCodes.Battery:
@@ -144,7 +147,6 @@ public sealed class HeadsetState
                 if (_lastEventSeq == v)
                     return false;
                 _lastEventSeq = v;
-                LastEventSeq = v;
                 return true;
             }
 
@@ -152,6 +154,28 @@ public sealed class HeadsetState
                 return false;
         }
     }
+
+    private static bool HasRequiredParameters(Frame f) => f.OpCode switch
+    {
+        OpCodes.Battery => f.Parameters.Length >= 3,
+        OpCodes.Firmware => f.Parameters.Length >= 2,
+        OpCodes.AncQuery
+            or OpCodes.EqQuery
+            or OpCodes.Query102
+            or OpCodes.Query104
+            or OpCodes.Event204
+            or OpCodes.GameModeQuery
+            or OpCodes.LowLatencyQuery
+            or OpCodes.DualConnQuery
+            or OpCodes.InEarQuery
+            or OpCodes.WindQuery => f.Parameters.Length >= 1,
+        OpCodes.ConfigRead
+            or OpCodes.Query1
+            or OpCodes.Query4
+            or OpCodes.Query6
+            or OpCodes.Query10A => f.Parameters.Length > 0,
+        _ => true,
+    };
 
     private static bool SetBool(ref int field, bool value, Action<bool?> assign)
     {

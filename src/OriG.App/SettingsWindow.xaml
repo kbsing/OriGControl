@@ -319,7 +319,7 @@
                                     <RadioButton x:Name="LeftSideChip" Style="{StaticResource SideChip}"
                                                  GroupName="TouchSide" Content="左耳"
                                                  Checked="TouchSide_Checked" />
-                                    <RadioButton x:Name="RightSideChip" Style="{StaticResource SideChip}"
+                                    <RadioButton Style="{StaticResource SideChip}"
                                                  GroupName="TouchSide" Content="右耳"
                                                  Checked="TouchSide_Checked" />
                                 </UniformGrid>
@@ -443,7 +443,7 @@
                                                 <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
                                             <TextBlock Text="版本" Style="{StaticResource RowTitle}" />
-                                            <TextBlock Grid.Column="1" Text="0.1.0"
+                                            <TextBlock x:Name="VersionValueText" Grid.Column="1" Text="0.1.0"
                                                        Style="{StaticResource RowValue}" />
                                         </Grid>
                                     </Border>

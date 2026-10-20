@@ -3,14 +3,12 @@ namespace OriG.Protocol;
 using System.Text;
 
 /// <summary>一个已解析的协议帧。</summary>
-public readonly record struct Frame(ushort OpCode, byte[] Parameters, int TotalLength)
+public readonly record struct Frame(ushort OpCode, byte[] Parameters)
 {
     /// <summary>取参数第 i 字节；越界返回 -1（便于把「缺失」与「值为 0」区分开）。</summary>
     public int this[int i] => i >= 0 && i < Parameters.Length ? Parameters[i] : -1;
 
     public bool IsOn(int i) => this[i] == 0x01;
-
-    public string Hex => Convert.ToHexString(Parameters);
 }
 
 /// <summary>
@@ -42,8 +40,6 @@ public static class FrameCodec
 
     public static byte[] SetAnc(byte mode) => Build(OpCodes.AncSet, mode, 0x00);
     public static byte[] SetEq(byte preset) => Build(OpCodes.EqSet, preset);
-    public static byte[] SetWind(bool on) => Build(OpCodes.WindSet, (byte)(on ? 1 : 0));
-    public static byte[] SetLowLatency(bool on) => Build(OpCodes.LowLatencySet, (byte)(on ? 1 : 0));
     public static byte[] SetFindEarbuds(bool on) => Build(OpCodes.FindEarbudsSet, (byte)(on ? 1 : 0));
     public static byte[] SetToneVolume(byte volume) => Build(OpCodes.Set202, volume);
     public static byte[] SetTouchAction(byte side, byte gesture, byte action, byte enabled = 1) =>
@@ -72,7 +68,7 @@ public static class FrameCodec
         buffer.Slice(offset + HeaderSize, paramCount).CopyTo(parameters);
 
         int opCode = buffer[offset + 4] | (buffer[offset + 5] << 8);
-        frame = new Frame((ushort)opCode, parameters, total);
+        frame = new Frame((ushort)opCode, parameters);
         consumed = total;
         return true;
     }

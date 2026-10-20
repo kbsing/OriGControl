@@ -60,6 +60,4 @@ public sealed class StreamDecoder
     }
 
     public void Reset() => _buffer.Clear();
-
-    public int BufferedBytes => _buffer.Count;
 }

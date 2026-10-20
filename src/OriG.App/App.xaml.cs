@@ -142,7 +142,7 @@ public partial class App : Application
 
         var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
         encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));
-        System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
+        System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(path))!);
         using var stream = System.IO.File.Create(path);
         encoder.Save(stream);
         Log.Write($"字形表已保存：{path}");
@@ -465,7 +465,11 @@ public partial class App : Application
         bool low = (state.BatteryLeft >= 0 && state.BatteryLeft <= threshold)
                    || (state.BatteryRight >= 0 && state.BatteryRight <= threshold);
 
-        bool recovered = state.BatteryLeft > threshold + 5 && state.BatteryRight > threshold + 5;
+        // 某一侧未知（-1）时按「未报警」处理，否则一只耳机没上报电量就永远无法复位。
+        bool hasKnown = state.BatteryLeft >= 0 || state.BatteryRight >= 0;
+        bool recovered = hasKnown
+                         && (state.BatteryLeft < 0 || state.BatteryLeft > threshold + 5)
+                         && (state.BatteryRight < 0 || state.BatteryRight > threshold + 5);
 
         if (low && !_lowBatteryNotified)
         {

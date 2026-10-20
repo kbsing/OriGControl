@@ -7,9 +7,6 @@ namespace OriG.Transport;
 /// </summary>
 public interface IHeadsetTransport : IAsyncDisposable
 {
-    string Name { get; }
-    bool IsConnected { get; }
-
     Task ConnectAsync(HeadsetServiceInfo service, CancellationToken ct = default);
     ValueTask WriteAsync(ReadOnlyMemory<byte> data, CancellationToken ct = default);
     ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default);

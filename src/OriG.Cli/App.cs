@@ -277,14 +277,14 @@ internal static class App
             case "tone":
                 if (value > 16)
                 {
-                    Console.WriteLine("? 提示音音量范围为 0..16");
+                    Console.WriteLine("✗ 提示音音量范围为 0..16");
                     return 1;
                 }
                 frame = FrameCodec.SetToneVolume(value);
                 verifyOp = OpCodes.Query102;
                 break;
             default:
-                Console.WriteLine($"? δ֪Ŀ�꣺{what}��֧�� anc / eq / tone / touch��");
+                Console.WriteLine($"✗ 未知目标：{what}（支持 anc / eq / tone / touch）");
                 return 1;
         }
 
@@ -324,18 +324,18 @@ internal static class App
 
         if (!TryParseSide(args[2], out byte side))
         {
-            Console.WriteLine($"? 无法解析耳侧：{args[2]}");
+            Console.WriteLine($"✗ 无法解析耳侧：{args[2]}");
             return 1;
         }
         if (!TryParseGesture(args[3], out byte gesture))
         {
-            Console.WriteLine($"? 无法解析手势：{args[3]}");
+            Console.WriteLine($"✗ 无法解析手势：{args[3]}");
             return 1;
         }
         if (!byte.TryParse(args[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out byte action)
             || !TouchAction.All.Contains(action))
         {
-            Console.WriteLine($"? 触控动作需为 0..8：{args[4]}");
+            Console.WriteLine($"✗ 触控动作需为 0..8：{args[4]}");
             return 1;
         }
 
@@ -359,7 +359,7 @@ internal static class App
         Console.WriteLine();
         if (binding is null)
         {
-            Console.WriteLine("? 回读未找到该触控项");
+            Console.WriteLine("✗ 回读未找到该触控项");
             return 1;
         }
 

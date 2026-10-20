@@ -66,6 +66,7 @@ public partial class TrayWindow : Window
     private System.Windows.Threading.DispatcherTimer? _findTimer;
     private bool _suppress;
     private bool _busy;
+    private bool _modalOpen;
     private DateTime _shownAt = DateTime.MinValue;
     private readonly System.Windows.Threading.DispatcherTimer _reconnectTimer = new();
     private readonly System.Windows.Threading.DispatcherTimer _idleTimer = new();
@@ -248,12 +249,17 @@ public partial class TrayWindow : Window
             if (ok)
             {
                 HintText.Text = "";
-                await _session.RefreshAsync();
             }
             else
             {
                 HintText.Text = _session.LastError ?? "连接失败";
             }
+        }
+        catch (Exception ex)
+        {
+            // ConnectAsync 自身已做清理，这里只兜底，避免 async void 调用方崩溃。
+            Log.Write($"连接异常：{ex.GetType().Name}: {ex.Message}");
+            HintText.Text = "连接异常，将稍后重试";
         }
         finally
         {
@@ -404,15 +410,15 @@ public partial class TrayWindow : Window
     public void ApplyMockState()
     {
         var st = _session.State;
-        st.Apply(new Protocol.Frame(OpCodes.Battery, [70, 66, 0], 9));
-        st.Apply(new Protocol.Frame(OpCodes.Firmware, [8, 4], 8));
-        st.Apply(new Protocol.Frame(OpCodes.AncQuery, [3], 7));
-        st.Apply(new Protocol.Frame(OpCodes.EqQuery, [2], 7));
-        st.Apply(new Protocol.Frame(OpCodes.GameModeQuery, [1], 7));
-        st.Apply(new Protocol.Frame(OpCodes.LowLatencyQuery, [1], 7));
-        st.Apply(new Protocol.Frame(OpCodes.DualConnQuery, [1], 7));
-        st.Apply(new Protocol.Frame(OpCodes.InEarQuery, [0], 7));
-        st.Apply(new Protocol.Frame(OpCodes.WindQuery, [1], 7));
+        st.Apply(new Protocol.Frame(OpCodes.Battery, [70, 66, 0]));
+        st.Apply(new Protocol.Frame(OpCodes.Firmware, [8, 4]));
+        st.Apply(new Protocol.Frame(OpCodes.AncQuery, [3]));
+        st.Apply(new Protocol.Frame(OpCodes.EqQuery, [2]));
+        st.Apply(new Protocol.Frame(OpCodes.GameModeQuery, [1]));
+        st.Apply(new Protocol.Frame(OpCodes.LowLatencyQuery, [1]));
+        st.Apply(new Protocol.Frame(OpCodes.DualConnQuery, [1]));
+        st.Apply(new Protocol.Frame(OpCodes.InEarQuery, [0]));
+        st.Apply(new Protocol.Frame(OpCodes.WindQuery, [1]));
 
         MockReady = true;
         ApplyStatus();
@@ -449,19 +455,34 @@ public partial class TrayWindow : Window
             graphics.CopyFromScreen(x, y, 0, 0, new System.Drawing.Size(width, height));
         }
 
-        System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
+        System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(path))!);
         bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png);
     }
 
     private void Window_Deactivated(object sender, EventArgs e)
     {
-        if (IsExiting || _settingsWindow is { IsVisible: true })
+        if (IsExiting || _modalOpen || _settingsWindow is { IsVisible: true })
             return;
 
         if ((DateTime.UtcNow - _shownAt).TotalMilliseconds < 250)
             return;
 
         HidePanel();
+    }
+
+    /// <summary>弹模态框时窗口会 Deactivated，用标志避免面板被自动隐藏。</summary>
+    private MessageBoxResult Confirm(string message, string title)
+    {
+        _modalOpen = true;
+        try
+        {
+            return MessageBox.Show(this, message, title, MessageBoxButton.YesNo,
+                MessageBoxImage.Warning, MessageBoxResult.No);
+        }
+        finally
+        {
+            _modalOpen = false;
+        }
     }
 
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
@@ -591,10 +612,9 @@ public partial class TrayWindow : Window
 
         if (mode == AncMode.Experimental)
         {
-            var choice = MessageBox.Show(this,
+            var choice = Confirm(
                 "实验性降噪使用更激进的降噪算法，可能出现声音异常。\n\n确定要开启吗？",
-                "实验性降噪", MessageBoxButton.YesNo, MessageBoxImage.Warning,
-                MessageBoxResult.No);
+                "实验性降噪");
             if (choice != MessageBoxResult.Yes)
             {
                 ApplyState();
@@ -667,13 +687,12 @@ public partial class TrayWindow : Window
         {
             if (!_finding)
             {
-                var choice = MessageBox.Show(this,
+                var choice = Confirm(
                     "此功能会让耳机发出较大的提示音。\n" +
                     "如果耳机正在您的耳朵里，请不要使用。\n" +
                     "建议在安全的环境下使用，提示音会持续几秒钟。\n\n" +
                     "确定要开始寻找耳机吗？",
-                    "查找耳机", MessageBoxButton.YesNo, MessageBoxImage.Warning,
-                    MessageBoxResult.No);
+                    "查找耳机");
                 if (choice != MessageBoxResult.Yes)
                     return;
 
@@ -895,7 +914,7 @@ public partial class TrayWindow : Window
         var encoder = new PngBitmapEncoder();
         encoder.Frames.Add(BitmapFrame.Create(bitmap));
 
-        System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
+        System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(path))!);
         using var stream = System.IO.File.Create(path);
         encoder.Save(stream);
         Log.Write($"快照已保存：{path}");

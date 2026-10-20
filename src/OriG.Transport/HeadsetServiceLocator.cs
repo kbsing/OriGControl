@@ -44,7 +44,7 @@ public static class HeadsetServiceLocator
         var list = new List<HeadsetServiceInfo>();
         foreach (var device in devices)
         {
-            var service = await RfcommDeviceService.FromIdAsync(device.Id);
+            using var service = await RfcommDeviceService.FromIdAsync(device.Id);
             if (service is null)
                 continue;
 
@@ -85,7 +85,11 @@ public static class HeadsetServiceLocator
                 var bt = await BluetoothDevice.FromIdAsync(info.Id).AsTask(ct);
                 if (bt is null)
                     continue;
-                list.Add(new PairedDeviceInfo(bt.Name, bt.BluetoothAddress, bt.ConnectionStatus == BluetoothConnectionStatus.Connected));
+                using (bt)
+                {
+                    list.Add(new PairedDeviceInfo(bt.Name, bt.BluetoothAddress,
+                        bt.ConnectionStatus == BluetoothConnectionStatus.Connected));
+                }
             }
             catch
             {

@@ -55,7 +55,7 @@
                         </StackPanel>
                     </StackPanel>
 
-                    <Button x:Name="CloseButton" Grid.Column="2"
+                    <Button Grid.Column="2"
                             Style="{StaticResource IconButton}"
                             Click="Close_Click" VerticalAlignment="Top"
                             ToolTip="关闭面板">
@@ -107,7 +107,7 @@
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
 
-                    <Button x:Name="SettingsButton" Grid.Column="0" Style="{StaticResource Pill}"
+                    <Button Grid.Column="0" Style="{StaticResource Pill}"
                             Click="Settings_Click">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="&#xE713;"

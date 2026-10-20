@@ -111,9 +111,6 @@ public static class AncMode
         WindNoise => "风噪模式",
         _ => $"未知(0x{v:X2})",
     };
-
-    /// <summary>UI 循环顺序；风噪模式不参与降噪循环。</summary>
-    public static readonly byte[] Cycle = [Off, Transparency, Normal, Deep];
 }
 
 /// <summary>均衡器预设，7 档全部实测可设。</summary>
@@ -138,7 +135,4 @@ public static class EqPreset
         Vocal => "温婉人声",
         _ => $"未知({v})",
     };
-
-    /// <summary>注意：设为 Game(0x04) 会联动打开游戏模式，UI 需同步。</summary>
-    public static readonly byte[] All = [Blue, Balanced, Bass, Pure, Game, Fine, Vocal];
 }

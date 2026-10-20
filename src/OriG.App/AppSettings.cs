@@ -19,8 +19,6 @@ public enum AppTheme
 /// <summary>用户设置，存 %LOCALAPPDATA%\OriGControl\settings.json。</summary>
 public sealed class AppSettings
 {
-    public bool AutoStart { get; set; }
-
     public string HotkeyCycleAnc { get; set; } = "Ctrl+Alt+A";
     public string HotkeyCycleEq { get; set; } = "Ctrl+Alt+E";
     public string HotkeyTogglePanel { get; set; } = "Ctrl+Alt+O";

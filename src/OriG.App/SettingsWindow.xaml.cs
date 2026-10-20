@@ -1,6 +1,7 @@
 namespace OriG.App;
 
 using System.Diagnostics;
+using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -17,6 +18,7 @@ public partial class SettingsWindow : Window
     private readonly HeadsetSession _session;
 
     private bool _loading;
+    private bool _modalOpen;
     private DateTime _shownAt = DateTime.MinValue;
 
     public event EventHandler? HotkeysChanged;
@@ -55,6 +57,12 @@ public partial class SettingsWindow : Window
         SourceInitialized += (_, _) => ApplyMaterial();
 
         AboutText.Text = "非官方第三方工具，与原道 / NiceHCK 无关联";
+
+        string? version = typeof(App).Assembly
+            .GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        VersionValueText.Text = string.IsNullOrWhiteSpace(version)
+            ? "未知"
+            : version.Split('+')[0];
 
         _saveTimer.Tick += (_, _) =>
         {
@@ -457,6 +465,9 @@ public partial class SettingsWindow : Window
 
     private void Window_Deactivated(object sender, EventArgs e)
     {
+        if (_modalOpen)
+            return;
+
         if ((DateTime.UtcNow - _shownAt).TotalMilliseconds < 250)
             return;
         HidePanel();
@@ -526,20 +537,23 @@ public partial class SettingsWindow : Window
 
         e.Handled = true;
 
-        if (e.Key == Key.Escape)
+        // Alt+键在 WPF 里是 Key.System，真实键在 SystemKey 里。
+        Key key = e.Key == Key.System ? e.SystemKey : e.Key;
+
+        if (key == Key.Escape)
         {
             LoadValues();
             return;
         }
 
-        if (e.Key is Key.Back or Key.Delete)
+        if (key is Key.Back or Key.Delete)
         {
             box.Text = "";
             SaveHotkey(box, "");
             return;
         }
 
-        string? gesture = HotkeyService.Format(e.Key, Keyboard.Modifiers);
+        string? gesture = HotkeyService.Format(key, Keyboard.Modifiers);
         if (gesture is null)
             return;
 
@@ -578,8 +592,6 @@ public partial class SettingsWindow : Window
 
         bool enabled = AutoStartBox.IsChecked == true;
         AutoStart.Set(enabled);
-        _settings.AutoStart = enabled;
-        _settings.Save();
         Log.Write($"开机自启 → {enabled}");
     }
 
@@ -652,7 +664,19 @@ public partial class SettingsWindow : Window
             CheckFileExists = true,
         };
 
-        if (dialog.ShowDialog(this) != true)
+        // 选图期间会触发 Deactivated，先挡住自动隐藏
+        _modalOpen = true;
+        bool? picked;
+        try
+        {
+            picked = dialog.ShowDialog(this);
+        }
+        finally
+        {
+            _modalOpen = false;
+        }
+
+        if (picked != true)
             return;
 
         _settings.BackgroundImagePath = dialog.FileName;
@@ -692,9 +716,10 @@ public partial class SettingsWindow : Window
     /// <summary>调试用：把设置页的四个页签分别渲染成 PNG。</summary>
     public void SaveSnapshotTabs(string path)
     {
-        string directory = System.IO.Path.GetDirectoryName(path) ?? ".";
-        string name = System.IO.Path.GetFileNameWithoutExtension(path);
-        string extension = System.IO.Path.GetExtension(path);
+        string fullPath = System.IO.Path.GetFullPath(path);
+        string directory = System.IO.Path.GetDirectoryName(fullPath)!;
+        string name = System.IO.Path.GetFileNameWithoutExtension(fullPath);
+        string extension = System.IO.Path.GetExtension(fullPath);
         if (string.IsNullOrEmpty(extension))
             extension = ".png";
 
@@ -710,11 +735,8 @@ public partial class SettingsWindow : Window
     }
 
     /// <summary>调试用：把设置页渲染成 PNG。</summary>
-    public void SaveSnapshot(string path, int tab = -1)
+    public void SaveSnapshot(string path)
     {
-        if (tab >= 0)
-            SelectTab(tab);
-
         UpdateLayout();
 
         double w = ActualWidth > 0 ? ActualWidth : Width;
@@ -746,7 +768,7 @@ public partial class SettingsWindow : Window
         var encoder = new PngBitmapEncoder();
         encoder.Frames.Add(BitmapFrame.Create(bitmap));
 
-        System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
+        System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(path))!);
         using var stream = System.IO.File.Create(path);
         encoder.Save(stream);
     }

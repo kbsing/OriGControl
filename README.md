@@ -84,8 +84,8 @@ dotnet publish .\src\OriG.App\OriG.App.csproj -c Release -r win-x64 `
 | 组合键 | 作用 |
 |---|---|
 | `Ctrl+Alt+A` | 循环切换降噪档位 |
-| `Ctrl+Alt+W` | 循环切换均衡器 |
-| `Ctrl+Shift+O` | 打开 / 关闭面板 |
+| `Ctrl+Alt+E` | 循环切换均衡器 |
+| `Ctrl+Alt+O` | 打开 / 关闭面板 |
 
 默认组合被其它软件占用时会自动降级到备选组合，并写回设置。
 可在设置页点击输入框后直接按下想要的组合键重新绑定。

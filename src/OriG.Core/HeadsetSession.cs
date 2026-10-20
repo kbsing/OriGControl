@@ -30,11 +30,16 @@ public sealed class HeadsetSession : IAsyncDisposable
 {
     private readonly IHeadsetTransport _transport;
     private readonly StreamDecoder _decoder = new();
+
+    /// <summary>RFCOMM 写操作不线程安全，所有下发命令都必须经过这把锁。</summary>
     private readonly SemaphoreSlim _writeGate = new(1, 1);
+
+    /// <summary>连接/断开互斥，避免两个流程同时操作同一个 socket 与读线程。</summary>
+    private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
+
     private CancellationTokenSource _cts = new();
 
     private Task? _pump;
-    private HeadsetServiceInfo? _service;
 
     public HeadsetState State { get; } = new();
     public SessionStatus Status { get; private set; } = SessionStatus.Disconnected;
@@ -55,72 +60,118 @@ public sealed class HeadsetSession : IAsyncDisposable
         if (Status is SessionStatus.Ready or SessionStatus.Handshaking)
             return true;
 
-        if (_cts.IsCancellationRequested)
-        {
-            _cts.Dispose();
-            _cts = new CancellationTokenSource();
-        }
-
-        SetStatus(SessionStatus.Connecting);
-
+        await _lifecycleGate.WaitAsync(ct);
         try
         {
-            var services = await HeadsetServiceLocator.FindAsync(ct: ct);
-            if (services.Count == 0)
-                return Fail("未找到耳机。请先在 Windows 设置里配对。");
+            if (Status is SessionStatus.Ready or SessionStatus.Handshaking)
+                return true;
 
-            _service = HeadsetServiceLocator.PickTarget(services);
-            if (_service is null)
-                return Fail("找到多个候选设备，但名称都不匹配。");
+            // 先把上一次可能残留的读线程/链路彻底停掉，再建新会话。
+            await StopSessionAsync();
 
-            // 预检：设备没连上时 WinRT 会卡十几秒才超时，先给个明确提示
-            var paired = await HeadsetServiceLocator.ListPairedAsync(ct);
-            var match = paired.FirstOrDefault(p =>
-                string.Equals(p.Name, _service.DisplayName, StringComparison.OrdinalIgnoreCase));
-            if (match is not null && !match.Connected)
-                return Fail("耳机未连接（可能已关机、在充电仓里或不在范围内）");
+            LastError = null;
+            SetStatus(SessionStatus.Connecting);
 
-            await _transport.ConnectAsync(_service, ct);
-            DeviceName = _service.DisplayName;
-
-            SetStatus(SessionStatus.Handshaking);
-            _pump = PumpAsync(_cts.Token);
-
-            // 官方 App 的握手序列：16 条，110ms 间隔
-            foreach (var op in OpCodes.Handshake)
+            try
             {
-                await _transport.WriteAsync(FrameCodec.Query(op), ct);
-                await Task.Delay(110, ct);
-            }
-            await Task.Delay(300, ct);
+                var services = await HeadsetServiceLocator.FindAsync(ct: ct);
+                if (services.Count == 0)
+                    return Fail("未找到耳机。请先在 Windows 设置里配对。");
 
-            SetStatus(SessionStatus.Ready);
-            return true;
+                var service = HeadsetServiceLocator.PickTarget(services);
+                if (service is null)
+                    return Fail("找到多个候选设备，但名称都不匹配。");
+
+                // 预检：设备没连上时 WinRT 会卡十几秒才超时，先给个明确提示
+                var paired = await HeadsetServiceLocator.ListPairedAsync(ct);
+                var match = paired.FirstOrDefault(p =>
+                    string.Equals(p.Name, service.DisplayName, StringComparison.OrdinalIgnoreCase));
+                if (match is not null && !match.Connected)
+                    return Fail("耳机未连接（可能已关机、在充电仓里或不在范围内）");
+
+                await _transport.ConnectAsync(service, ct);
+                DeviceName = service.DisplayName;
+
+                // 上一会话可能在半帧处断开，缓冲里的残字节不能带进新链路。
+                _decoder.Reset();
+
+                SetStatus(SessionStatus.Handshaking);
+                _pump = PumpAsync(_cts.Token);
+
+                // 官方 App 的握手序列：16 条，110ms 间隔
+                foreach (var op in OpCodes.Handshake)
+                {
+                    await _transport.WriteAsync(FrameCodec.Query(op), ct);
+                    await Task.Delay(110, ct);
+                }
+                await Task.Delay(300, ct);
+
+                // 读线程在握手期间已经退出，说明链路并未真正建立。
+                if (_pump.IsCompleted)
+                {
+                    await StopSessionAsync();
+                    return Fail("握手期间连接已断开");
+                }
+
+                SetStatus(SessionStatus.Ready);
+                return true;
+            }
+            catch (OperationCanceledException)
+            {
+                await StopSessionAsync();
+                SetStatus(SessionStatus.Disconnected);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                await StopSessionAsync();
+
+                // WinRT 有些异常 Message 是空的，退化成类型名 + HRESULT，否则界面只显示「连接失败：」
+                string detail = string.IsNullOrWhiteSpace(ex.Message)
+                    ? $"{ex.GetType().Name} (0x{ex.HResult:X8})"
+                    : ex.Message;
+                return Fail($"连接失败：{detail}");
+            }
         }
-        catch (OperationCanceledException)
+        finally
         {
-            return Fail("已取消");
-        }
-        catch (Exception ex)
-        {
-            // WinRT 有些异常 Message 是空的，退化成类型名 + HRESULT，否则界面只显示「连接失败：」
-            string detail = string.IsNullOrWhiteSpace(ex.Message)
-                ? $"{ex.GetType().Name} (0x{ex.HResult:X8})"
-                : ex.Message;
-            return Fail($"连接失败：{detail}");
+            _lifecycleGate.Release();
         }
     }
 
     public async Task DisconnectAsync()
     {
-        await _cts.CancelAsync();
+        await _lifecycleGate.WaitAsync();
+        try
+        {
+            await StopSessionAsync();
+            SetStatus(SessionStatus.Disconnected);
+        }
+        finally
+        {
+            _lifecycleGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// 停掉读线程并关闭链路。调用方必须持有 <see cref="_lifecycleGate"/>。
+    /// 先 await 读线程再改状态，避免旧读线程在断开后把状态改回 Faulted。
+    /// </summary>
+    private async Task StopSessionAsync()
+    {
+        try { await _cts.CancelAsync(); } catch { /* 忽略 */ }
+
         if (_pump is not null)
         {
             try { await _pump; } catch { /* 忽略 */ }
             _pump = null;
         }
-        await _transport.DisconnectAsync();
-        SetStatus(SessionStatus.Disconnected);
+
+        try { await _transport.DisconnectAsync(); } catch { /* 忽略 */ }
+        _decoder.Reset();
+
+        _cts.Dispose();
+        _cts = new CancellationTokenSource();
     }
 
     private bool Fail(string message)
@@ -174,18 +225,6 @@ public sealed class HeadsetSession : IAsyncDisposable
 
     // ------------------------------------------------------------- 命令
 
-    /// <summary>刷新全部状态（面板打开时调用）。</summary>
-    public async Task RefreshAsync(CancellationToken ct = default)
-    {
-        if (Status != SessionStatus.Ready)
-            return;
-        foreach (var op in OpCodes.Handshake)
-        {
-            await _transport.WriteAsync(FrameCodec.Query(op), ct);
-            await Task.Delay(60, ct);
-        }
-    }
-
     public Task<bool> SetAncAsync(byte mode, CancellationToken ct = default) =>
         SetAndVerifyAsync(FrameCodec.SetAnc(mode), OpCodes.AncQuery,
             () => State.Anc == mode, ct);
@@ -198,9 +237,12 @@ public sealed class HeadsetSession : IAsyncDisposable
         if (Status != SessionStatus.Ready)
             return false;
 
-        await _writeGate.WaitAsync(ct);
+        bool entered = false;
         try
         {
+            await _writeGate.WaitAsync(ct);
+            entered = true;
+
             await _transport.WriteAsync(FrameCodec.SetFindEarbuds(on), ct);
             await Task.Delay(20, ct);
             return true;
@@ -216,13 +258,23 @@ public sealed class HeadsetSession : IAsyncDisposable
         }
         finally
         {
-            _writeGate.Release();
+            if (entered)
+                _writeGate.Release();
         }
     }
 
-    public Task<bool> SetEqAsync(byte preset, CancellationToken ct = default) =>
-        SetAndVerifyAsync(FrameCodec.SetEq(preset), OpCodes.EqQuery,
+    public async Task<bool> SetEqAsync(byte preset, CancellationToken ct = default)
+    {
+        bool ok = await SetAndVerifyAsync(FrameCodec.SetEq(preset), OpCodes.EqQuery,
             () => State.Eq == preset, ct);
+
+        // 协议规定 EQ=0x04 会联动打开游戏模式（docs/PROTOCOL-CAPTURED.md），
+        // 设备不一定主动上报，这里显式同步一次，避免 UI 与设备不一致。
+        if (ok && preset == EqPreset.Game && State.GameMode != true)
+            await SetToggleAsync(Toggle.GameMode, true, ct);
+
+        return ok;
+    }
 
     public Task<bool> SetToneVolumeAsync(byte volume, CancellationToken ct = default)
     {
@@ -283,9 +335,13 @@ public sealed class HeadsetSession : IAsyncDisposable
         if (Status != SessionStatus.Ready)
             return false;
 
-        await _writeGate.WaitAsync(ct);
+        bool entered = false;
         try
         {
+            // 放在 try 内：取消时 WaitAsync 会抛异常，不能让调用方看到未处理异常。
+            await _writeGate.WaitAsync(ct);
+            entered = true;
+
             await _transport.WriteAsync(setFrame, ct);
             await Task.Delay(20, ct);
             await _transport.WriteAsync(FrameCodec.Query(queryOp), ct);
@@ -310,7 +366,8 @@ public sealed class HeadsetSession : IAsyncDisposable
         }
         finally
         {
-            _writeGate.Release();
+            if (entered)
+                _writeGate.Release();
         }
     }
 
@@ -318,7 +375,9 @@ public sealed class HeadsetSession : IAsyncDisposable
     {
         await DisconnectAsync();
         await _transport.DisposeAsync();
-        _writeGate.Dispose();
+
+        // _writeGate / _lifecycleGate 不显式 Dispose：SemaphoreSlim 没有等待句柄时
+        // 不释放也不会泄漏，反而可能与仍在执行的命令发生 ObjectDisposedException 竞态。
         _cts.Dispose();
     }
 }

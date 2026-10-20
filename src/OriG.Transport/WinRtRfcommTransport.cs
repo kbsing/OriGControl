@@ -15,9 +15,6 @@ public sealed class WinRtRfcommTransport : IHeadsetTransport
     private StreamSocket? _socket;
     private DataWriter? _writer;
 
-    public string Name => "WinRT-RFCOMM";
-    public bool IsConnected => _socket is not null;
-
     public async Task ConnectAsync(HeadsetServiceInfo service, CancellationToken ct = default)
     {
         await DisconnectAsync();
