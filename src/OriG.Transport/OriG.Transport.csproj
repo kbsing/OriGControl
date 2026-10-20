@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- 必须带 Windows SDK 版本号，否则调不到 Windows.Devices.Bluetooth.Rfcomm -->
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
+    <RootNamespace>OriG.Transport</RootNamespace>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OriG.Protocol\OriG.Protocol.csproj" />
+  </ItemGroup>
+</Project>

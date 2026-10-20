@@ -1,0 +1,42 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- ============ 浅色主题调色板 ============ -->
+
+    <SolidColorBrush x:Key="TextBrush" Color="#14161A" />
+    <SolidColorBrush x:Key="SubtleBrush" Color="#4B5563" />
+    <SolidColorBrush x:Key="MutedBrush" Color="#6B7280" />
+    <SolidColorBrush x:Key="DividerBrush" Color="#DFE3E8" />
+
+    <SolidColorBrush x:Key="AccentBrush" Color="#2F6BFF" />
+    <SolidColorBrush x:Key="AccentTextBrush" Color="#1746C8" />
+    <SolidColorBrush x:Key="AccentSoftBrush" Color="#DCE7FF" />
+
+    <!-- 分段控件 -->
+    <SolidColorBrush x:Key="SegBgBrush" Color="#F2F3F5" />
+    <SolidColorBrush x:Key="SegHoverBrush" Color="#8CFFFFFF" />
+    <SolidColorBrush x:Key="SegSelectedBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="SegSelectedBorderBrush" Color="#E3E6EA" />
+
+    <!-- 下拉 / 胶囊 -->
+    <SolidColorBrush x:Key="SurfaceBrush" Color="#F2F3F5" />
+    <SolidColorBrush x:Key="SurfaceHoverBrush" Color="#E9EBEF" />
+    <SolidColorBrush x:Key="SurfacePressedBrush" Color="#DFE2E6" />
+    <SolidColorBrush x:Key="PopupBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="PopupBorderBrush" Color="#E3E6EA" />
+
+    <!-- 开关 -->
+    <SolidColorBrush x:Key="TrackBrush" Color="#D3D7DE" />
+
+    <!-- 电量 -->
+    <SolidColorBrush x:Key="BatteryTrackBrush" Color="#E1E4E9" />
+    <SolidColorBrush x:Key="BatteryBarBorderBrush" Color="#D9DDE3" />
+    <SolidColorBrush x:Key="BatteryBarFillBrush" Color="#B7E9C4" />
+    <SolidColorBrush x:Key="BatteryBarLowFillBrush" Color="#FFC9C4" />
+
+    <!-- 图标 -->
+    <SolidColorBrush x:Key="IconBrush" Color="#6B7280" />
+    <SolidColorBrush x:Key="IconSubtleBrush" Color="#4B5563" />
+    <SolidColorBrush x:Key="CardBorderBrush" Color="#66FFFFFF" />
+
+</ResourceDictionary>

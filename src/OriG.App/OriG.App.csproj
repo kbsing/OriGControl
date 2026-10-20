@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>OriG.App</RootNamespace>
+    <AssemblyName>OriGControl</AssemblyName>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OriG.Protocol\OriG.Protocol.csproj" />
+    <ProjectReference Include="..\OriG.Transport\OriG.Transport.csproj" />
+    <ProjectReference Include="..\OriG.Core\OriG.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Resource Include="Assets\app.ico" />
+  </ItemGroup>
+</Project>

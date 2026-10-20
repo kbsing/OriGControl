@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- Core 包装了 Transport，而 Transport 依赖 WinRT，故必须同为 Windows TFM -->
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
+    <RootNamespace>OriG.Core</RootNamespace>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OriG.Protocol\OriG.Protocol.csproj" />
+    <ProjectReference Include="..\OriG.Transport\OriG.Transport.csproj" />
+  </ItemGroup>
+</Project>

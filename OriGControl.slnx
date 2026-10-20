@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/OriG.App/OriG.App.csproj" />
+    <Project Path="src/OriG.Cli/OriG.Cli.csproj" />
+    <Project Path="src/OriG.Core/OriG.Core.csproj" />
+    <Project Path="src/OriG.Protocol/OriG.Protocol.csproj" />
+    <Project Path="src/OriG.Transport/OriG.Transport.csproj" />
+  </Folder>
+</Solution>
