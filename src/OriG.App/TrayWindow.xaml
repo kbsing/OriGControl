@@ -30,12 +30,13 @@
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
 
-                    <Border Grid.Column="0" Width="32" Height="32" CornerRadius="10"
-                            Background="{DynamicResource AccentBrush}" VerticalAlignment="Top"
-                            Margin="0,1,0,0">
+                    <Border Grid.Column="0" Width="36" Height="36" CornerRadius="11"
+                            Background="{DynamicResource CardBrush}"
+                            BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1"
+                            VerticalAlignment="Top">
                         <TextBlock Text="&#xE7F6;"
                                    FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
-                                   FontSize="19" Foreground="#FFFFFF"
+                                   FontSize="19" Foreground="{DynamicResource AccentBrush}"
                                    HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
 

@@ -14,8 +14,8 @@ internal static class BatteryDisplay
     private const double RingSize = 118;
     private const double RingThickness = 9;
 
-    // 语义色不随主题变化
-    private static readonly Brush GoodBrush = Frozen("#34C759");
+    // 正常电量跟随主题强调色，警告/过低保持语义色
+    private static Brush GoodBrush => ThemeManager.Brush("AccentBrush", "#C8F25A");
     private static readonly Brush WarnBrush = Frozen("#FF9F0A");
     private static readonly Brush LowBrush = Frozen("#FF3B30");
 

@@ -3,40 +3,47 @@
 
     <!-- ============ 浅色主题调色板 ============ -->
 
-    <SolidColorBrush x:Key="TextBrush" Color="#14161A" />
-    <SolidColorBrush x:Key="SubtleBrush" Color="#4B5563" />
-    <SolidColorBrush x:Key="MutedBrush" Color="#6B7280" />
-    <SolidColorBrush x:Key="DividerBrush" Color="#DFE3E8" />
+    <SolidColorBrush x:Key="TextBrush" Color="#171A14" />
+    <SolidColorBrush x:Key="SubtleBrush" Color="#4C5346" />
+    <SolidColorBrush x:Key="MutedBrush" Color="#737A6C" />
+    <SolidColorBrush x:Key="DividerBrush" Color="#E4E7DF" />
 
-    <SolidColorBrush x:Key="AccentBrush" Color="#2F6BFF" />
-    <SolidColorBrush x:Key="AccentTextBrush" Color="#1746C8" />
-    <SolidColorBrush x:Key="AccentSoftBrush" Color="#DCE7FF" />
+    <!-- 强调色：深橄榄绿，保证浅底上的可读性 -->
+    <SolidColorBrush x:Key="AccentBrush" Color="#9BC22B" />
+    <SolidColorBrush x:Key="AccentTextBrush" Color="#4E6B00" />
+    <SolidColorBrush x:Key="AccentSoftBrush" Color="#EFF7DA" />
+    <SolidColorBrush x:Key="AccentBorderBrush" Color="#C3D79B" />
+    <SolidColorBrush x:Key="OnAccentBrush" Color="#10120A" />
 
     <!-- 分段控件 -->
-    <SolidColorBrush x:Key="SegBgBrush" Color="#F2F3F5" />
-    <SolidColorBrush x:Key="SegHoverBrush" Color="#8CFFFFFF" />
-    <SolidColorBrush x:Key="SegSelectedBrush" Color="#FFFFFF" />
-    <SolidColorBrush x:Key="SegSelectedBorderBrush" Color="#E3E6EA" />
+    <SolidColorBrush x:Key="SegBgBrush" Color="#F0F2EB" />
+    <SolidColorBrush x:Key="SegHoverBrush" Color="#E8EBE1" />
+    <SolidColorBrush x:Key="SegSelectedBrush" Color="#9BC22B" />
+    <SolidColorBrush x:Key="SegSelectedBorderBrush" Color="#9BC22B" />
 
-    <!-- 下拉 / 胶囊 -->
-    <SolidColorBrush x:Key="SurfaceBrush" Color="#F2F3F5" />
-    <SolidColorBrush x:Key="SurfaceHoverBrush" Color="#E9EBEF" />
-    <SolidColorBrush x:Key="SurfacePressedBrush" Color="#DFE2E6" />
+    <!-- 卡片 / 下拉 / 胶囊 -->
+    <SolidColorBrush x:Key="SurfaceBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="SurfaceHoverBrush" Color="#EFF1EA" />
+    <SolidColorBrush x:Key="SurfacePressedBrush" Color="#E5E8DE" />
+    <SolidColorBrush x:Key="CardBrush" Color="#F5F6F2" />
+    <SolidColorBrush x:Key="CardBorderBrush" Color="#E4E7DF" />
+    <SolidColorBrush x:Key="InsetBrush" Color="#F0F2EC" />
     <SolidColorBrush x:Key="PopupBrush" Color="#FFFFFF" />
-    <SolidColorBrush x:Key="PopupBorderBrush" Color="#E3E6EA" />
+    <SolidColorBrush x:Key="PopupBorderBrush" Color="#DDE1D6" />
 
     <!-- 开关 -->
-    <SolidColorBrush x:Key="TrackBrush" Color="#D3D7DE" />
+    <SolidColorBrush x:Key="TrackBrush" Color="#DDE1D6" />
+    <SolidColorBrush x:Key="SwitchThumbOnBrush" Color="#10120A" />
+    <SolidColorBrush x:Key="SwitchThumbOffBrush" Color="#A8AFA2" />
 
     <!-- 电量 -->
-    <SolidColorBrush x:Key="BatteryTrackBrush" Color="#E1E4E9" />
-    <SolidColorBrush x:Key="BatteryBarBorderBrush" Color="#D9DDE3" />
-    <SolidColorBrush x:Key="BatteryBarFillBrush" Color="#B7E9C4" />
-    <SolidColorBrush x:Key="BatteryBarLowFillBrush" Color="#FFC9C4" />
+    <SolidColorBrush x:Key="BatteryTrackBrush" Color="#E1E4D9" />
+    <SolidColorBrush x:Key="BatteryBarBorderBrush" Color="#D9DDD0" />
+    <SolidColorBrush x:Key="BatteryBarFillBrush" Color="#9BC22B" />
+    <SolidColorBrush x:Key="BatteryBarLowFillBrush" Color="#FFC9BA" />
 
     <!-- 图标 -->
-    <SolidColorBrush x:Key="IconBrush" Color="#6B7280" />
-    <SolidColorBrush x:Key="IconSubtleBrush" Color="#4B5563" />
-    <SolidColorBrush x:Key="CardBorderBrush" Color="#66FFFFFF" />
+    <SolidColorBrush x:Key="IconBrush" Color="#6C7464" />
+    <SolidColorBrush x:Key="IconSubtleBrush" Color="#4C5346" />
 
 </ResourceDictionary>

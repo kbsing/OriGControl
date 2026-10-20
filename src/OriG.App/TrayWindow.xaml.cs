@@ -93,6 +93,7 @@ public partial class TrayWindow : Window
         _reconnectTimer.Tick += ReconnectTimer_Tick;
         _idleTimer.Tick += IdleTimer_Tick;
 
+
         ApplyStatus();
     }
 
@@ -112,9 +113,9 @@ public partial class TrayWindow : Window
         Color color = (hasBackdrop, IsDark) switch
         {
             (true, false) => Color.FromArgb(0xE6, 0xFF, 0xFF, 0xFF),
-            (true, true) => Color.FromArgb(0xD9, 0x1A, 0x1D, 0x22),
+            (true, true) => Color.FromArgb(0xE6, 0x18, 0x1A, 0x17),
             (false, false) => Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF),
-            (false, true) => Color.FromArgb(0xFF, 0x1A, 0x1D, 0x22),
+            (false, true) => Color.FromArgb(0xFF, 0x18, 0x1A, 0x17),
         };
         return new SolidColorBrush(color);
     }
@@ -132,6 +133,10 @@ public partial class TrayWindow : Window
     /// <summary>设置页改了外观后调用。</summary>
     public void OnAppearanceChanged()
     {
+        ApplyStatus();
+        _lastBattery = null;
+        ApplyState();
+
         if (IsVisible)
             ShowNearTray(activate: false);
     }
@@ -183,19 +188,28 @@ public partial class TrayWindow : Window
         foreach (var (preset, name) in EqItems)
             EqCombo.Items.Add(new ComboBoxItem { Content = name, Tag = preset });
 
-        foreach (var (toggle, name) in ToggleItems)
+        for (int i = 0; i < ToggleItems.Length; i++)
         {
+            var (toggle, name) = ToggleItems[i];
+
             var box = new CheckBox
             {
                 Style = switchStyle,
                 Content = name,
                 Tag = toggle,
-                Margin = new Thickness(0, 0, 0, 10),
+                Margin = new Thickness(0, 7, 0, 7),
             };
             box.Checked += Toggle_Changed;
             box.Unchecked += Toggle_Changed;
             _toggleBoxes[toggle] = box;
             TogglePanel.Children.Add(box);
+
+            if (i < ToggleItems.Length - 1)
+            {
+                var divider = new Border { Height = 1, Margin = new Thickness(0, 2, 0, 2) };
+                divider.SetResourceReference(Border.BackgroundProperty, "DividerBrush");
+                TogglePanel.Children.Add(divider);
+            }
         }
     }
 
@@ -466,9 +480,12 @@ public partial class TrayWindow : Window
     {
         Log.Write($"状态 → {_session.Status}" + (_session.LastError is null ? "" : $"（{_session.LastError}）"));
 
+        Brush accent = ThemeManager.Brush("AccentBrush", "#C8F25A");
+        Color readyColor = accent is SolidColorBrush { Color: var color } ? color : Color.FromRgb(0x2F, 0xB3, 0x5E);
+
         (Color dot, string text) = _session.Status switch
         {
-            SessionStatus.Ready => (Color.FromRgb(0x2F, 0xB3, 0x5E), "已连接"),
+            SessionStatus.Ready => (readyColor, "已连接"),
             SessionStatus.Connecting => (Color.FromRgb(0xE0, 0x9B, 0x2D), "正在连接…"),
             SessionStatus.Handshaking => (Color.FromRgb(0xE0, 0x9B, 0x2D), "正在同步…"),
             SessionStatus.Faulted => (Color.FromRgb(0xD9, 0x3D, 0x3D), _session.LastError ?? "连接失败"),
@@ -485,7 +502,7 @@ public partial class TrayWindow : Window
 
         if (MockReady)
         {
-            StatusDot.Fill = new SolidColorBrush(Color.FromRgb(0x2F, 0xB3, 0x5E));
+            StatusDot.Fill = new SolidColorBrush(readyColor);
             StatusText.Text = "已连接";
         }
 
@@ -837,7 +854,7 @@ public partial class TrayWindow : Window
     }
 
     /// <summary>调试用：设置页快照。</summary>
-    public void SnapshotSettings(string path) => _settingsWindow?.SaveSnapshot(path);
+    public void SnapshotSettings(string path) => _settingsWindow?.SaveSnapshotTabs(path);
 
     /// <summary>
     /// 把面板渲染成 PNG。磨砂底本身就是 WPF 视觉树的一部分，所以快照能真实反映效果。

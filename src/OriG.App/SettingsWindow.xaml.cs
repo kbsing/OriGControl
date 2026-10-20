@@ -50,10 +50,11 @@ public partial class SettingsWindow : Window
         _settings = settings;
         _session = session;
 
+        _loading = true;
         InitializeComponent();
         SourceInitialized += (_, _) => ApplyMaterial();
 
-        AboutText.Text = "OriG Control 0.1.0 · 非官方第三方工具，与原道 / NiceHCK 无关联";
+        AboutText.Text = "非官方第三方工具，与原道 / NiceHCK 无关联";
 
         _saveTimer.Tick += (_, _) =>
         {
@@ -70,6 +71,8 @@ public partial class SettingsWindow : Window
         BuildTouchEditor();
         LoadValues();
         ApplyHeadsetState();
+        GeneralTab.IsChecked = true;
+        LeftSideChip.IsChecked = true;
 
         _session.StateChanged += Session_StateChanged;
         _session.StatusChanged += Session_StatusChanged;
@@ -83,82 +86,72 @@ public partial class SettingsWindow : Window
 
     private void BuildTouchEditor()
     {
+        BuildTouchSide(TouchSide.Left, LeftTouchPanel);
+        BuildTouchSide(TouchSide.Right, RightTouchPanel);
+    }
+
+    private void BuildTouchSide(byte side, Panel host)
+    {
         var comboStyle = (Style)FindResource("Combo");
-        var bodyStyle = (Style)FindResource("BodyText");
-
-        TouchGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(44) });
-        for (int i = 0; i < TouchGesture.All.Length; i++)
-            TouchGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        TouchGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        TouchGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        TouchGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var rowStyle = (Style)FindResource("RowTitle");
+        var miniStyle = (Style)FindResource("MiniSwitch");
 
         for (int i = 0; i < TouchGesture.All.Length; i++)
         {
-            var header = new TextBlock
+            byte gesture = TouchGesture.All[i];
+
+            var title = new TextBlock
             {
-                Text = TouchGesture.Name(TouchGesture.All[i]),
-                FontSize = 10.5,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                Margin = new Thickness(0, 0, 0, 4),
+                Text = TouchGesture.Name(gesture),
+                Style = rowStyle,
+                FontSize = 12.5,
             };
-            header.SetResourceReference(TextBlock.ForegroundProperty, "MutedBrush");
-            Grid.SetColumn(header, i + 1);
-            Grid.SetRow(header, 0);
-            TouchGrid.Children.Add(header);
-        }
 
-        byte[] sides = [TouchSide.Left, TouchSide.Right];
-        for (int row = 0; row < sides.Length; row++)
-        {
-            byte side = sides[row];
-            var sideLabel = new TextBlock
+            var combo = new ComboBox
             {
-                Text = TouchSide.Name(side),
-                Style = bodyStyle,
-                FontSize = 12,
+                Style = comboStyle,
+                Width = 132,
+                Margin = new Thickness(0, 0, 12, 0),
+                Tag = (side, gesture),
+                VerticalAlignment = VerticalAlignment.Center,
             };
-            Grid.SetColumn(sideLabel, 0);
-            Grid.SetRow(sideLabel, row + 1);
-            TouchGrid.Children.Add(sideLabel);
 
-            for (int column = 0; column < TouchGesture.All.Length; column++)
+            foreach (byte action in TouchActionKind.All)
+                combo.Items.Add(new ComboBoxItem { Content = TouchActionKind.Name(action), Tag = action });
+
+            combo.SelectionChanged += Touch_SelectionChanged;
+            _touchBoxes[combo] = (side, gesture);
+
+            var enable = new CheckBox
             {
-                byte gesture = TouchGesture.All[column];
-                var combo = new ComboBox
-                {
-                    Style = comboStyle,
-                    Margin = new Thickness(3),
-                    MinWidth = 78,
-                    Tag = (side, gesture),
-                };
+                Style = miniStyle,
+                Tag = (side, gesture),
+                IsChecked = true,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            enable.Checked += TouchEnable_Changed;
+            enable.Unchecked += TouchEnable_Changed;
+            _touchEnableBoxes[enable] = (side, gesture);
 
-                foreach (byte action in TouchActionKind.All)
-                    combo.Items.Add(new ComboBoxItem { Content = TouchActionKind.Name(action), Tag = action });
+            var row = new Grid { Margin = new Thickness(0, 8, 0, 8) };
+            row.ColumnDefinitions.Add(new ColumnDefinition());
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-                combo.SelectionChanged += Touch_SelectionChanged;
-                _touchBoxes[combo] = (side, gesture);
+            Grid.SetColumn(combo, 1);
+            Grid.SetColumn(enable, 2);
+            row.Children.Add(title);
+            row.Children.Add(combo);
+            row.Children.Add(enable);
 
-                var enable = new CheckBox
-                {
-                    Style = (Style)FindResource("MiniCheck"),
-                    Content = "启用",
-                    Margin = new Thickness(5, 2, 0, 2),
-                    Tag = (side, gesture),
-                    IsChecked = true,
-                };
-                enable.Checked += TouchEnable_Changed;
-                enable.Unchecked += TouchEnable_Changed;
-                _touchEnableBoxes[enable] = (side, gesture);
-
-                var cell = new StackPanel();
-                cell.Children.Add(combo);
-                cell.Children.Add(enable);
-
-                Grid.SetColumn(cell, column + 1);
-                Grid.SetRow(cell, row + 1);
-                TouchGrid.Children.Add(cell);
+            if (host.Children.Count > 0)
+            {
+                var divider = new Border { Height = 1 };
+                divider.SetResourceReference(Border.BackgroundProperty, "DividerBrush");
+                host.Children.Add(divider);
             }
+
+            host.Children.Add(row);
         }
     }
 
@@ -173,7 +166,8 @@ public partial class SettingsWindow : Window
         var state = _session.State;
         bool ready = _session.Status == SessionStatus.Ready;
         HeadsetPanel.IsEnabled = ready;
-        TouchGrid.IsEnabled = ready;
+        TouchEditorPanel.IsEnabled = ready;
+        ThresholdSlider.IsEnabled = _settings.LowBatteryNotify;
 
         _loading = true;
         try
@@ -193,7 +187,11 @@ public partial class SettingsWindow : Window
             }
 
             CodecValueText.Text = CodecProtocol.Describe(state.Query104);
-            TouchCycleText.Text = $"降噪循环：{TouchConfig.AncCycleText(state.Query10A)}";
+            TouchCycleText.Text = TouchConfig.AncCycleText(state.Query10A);
+            DeviceNameValueText.Text = string.IsNullOrWhiteSpace(_session.DeviceName)
+                ? "原道耳机"
+                : _session.DeviceName;
+            FirmwareValueText.Text = state.FirmwareMain < 0 ? "未读取" : state.FirmwareText;
 
             if (!ready)
             {
@@ -280,7 +278,7 @@ public partial class SettingsWindow : Window
             return;
         }
 
-        TouchGrid.IsEnabled = false;
+        TouchEditorPanel.IsEnabled = false;
         try
         {
             byte enabled = TouchConfig.Find(_session.State.ConfigTable, cell.Item1, cell.Item2)?.Enabled ?? 1;
@@ -291,7 +289,7 @@ public partial class SettingsWindow : Window
         }
         finally
         {
-            TouchGrid.IsEnabled = _session.Status == SessionStatus.Ready;
+            TouchEditorPanel.IsEnabled = _session.Status == SessionStatus.Ready;
         }
     }
 
@@ -308,7 +306,7 @@ public partial class SettingsWindow : Window
             return;
 
         byte enabled = (byte)(box.IsChecked == true ? 1 : 0);
-        TouchGrid.IsEnabled = false;
+        TouchEditorPanel.IsEnabled = false;
         try
         {
             bool ok = await _session.SetTouchActionAsync(
@@ -319,7 +317,7 @@ public partial class SettingsWindow : Window
         }
         finally
         {
-            TouchGrid.IsEnabled = _session.Status == SessionStatus.Ready;
+            TouchEditorPanel.IsEnabled = _session.Status == SessionStatus.Ready;
         }
     }
 
@@ -334,9 +332,9 @@ public partial class SettingsWindow : Window
     private Brush CardScrim(bool hasBackdrop) => new SolidColorBrush((hasBackdrop, IsDark) switch
     {
         (true, false) => Color.FromArgb(0xE6, 0xFF, 0xFF, 0xFF),
-        (true, true) => Color.FromArgb(0xD9, 0x1A, 0x1D, 0x22),
+        (true, true) => Color.FromArgb(0xE6, 0x18, 0x1A, 0x17),
         (false, false) => Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF),
-        (false, true) => Color.FromArgb(0xFF, 0x1A, 0x1D, 0x22),
+        (false, true) => Color.FromArgb(0xFF, 0x18, 0x1A, 0x17),
     });
 
     private void LoadValues()
@@ -351,18 +349,10 @@ public partial class SettingsWindow : Window
             AutoStartBox.IsChecked = AutoStart.IsEnabled();
             LowBatteryBox.IsChecked = _settings.LowBatteryNotify;
 
-            foreach (ComboBoxItem item in ThresholdBox.Items)
-            {
-                if (item.Tag is string tag && tag == _settings.LowBatteryThreshold.ToString())
-                {
-                    ThresholdBox.SelectedItem = item;
-                    break;
-                }
-            }
-            if (ThresholdBox.SelectedItem is null && ThresholdBox.Items.Count > 0)
-                ThresholdBox.SelectedIndex = 1;
-
-            ThresholdBox.IsEnabled = _settings.LowBatteryNotify;
+            ThresholdSlider.Value = Math.Clamp(
+                _settings.LowBatteryThreshold, ThresholdSlider.Minimum, ThresholdSlider.Maximum);
+            ThresholdValueText.Text = $"{(int)ThresholdSlider.Value}%";
+            ThresholdSlider.IsEnabled = _settings.LowBatteryNotify;
             SelectIdleDisconnect(_settings.IdleDisconnectMinutes);
             RingChip.IsChecked = _settings.BatteryStyle == BatteryStyle.Ring;
             BarChip.IsChecked = _settings.BatteryStyle == BatteryStyle.Bar;
@@ -419,23 +409,18 @@ public partial class SettingsWindow : Window
 
     public void ShowNear(Window owner)
     {
-        SizeToContent = SizeToContent.Manual;
-        ContentScroller.MaxHeight = Math.Max(320, SystemParameters.WorkArea.Height - 40);
-        RootGrid.Measure(new Size(Width, double.PositiveInfinity));
-        double contentHeight = RootGrid.DesiredSize.Height;
-        if (contentHeight < 40)
-            contentHeight = 480;
-        Height = contentHeight;
+        Width = 460;
+        Height = Math.Min(620, Math.Max(420, SystemParameters.WorkArea.Height - 40));
 
         double left = owner.Left - Width - 10;
         if (left < 0)
             left = owner.Left + owner.ActualWidth + 10;
 
         Left = left;
-        Top = Math.Max(0, owner.Top + owner.ActualHeight - contentHeight);
+        Top = Math.Max(0, owner.Top + owner.ActualHeight - Height);
 
         bool imageMode = HasBackgroundImage
-            && FrostedBackdrop.ApplyImage(BackdropImage, _settings.BackgroundImagePath, Width, contentHeight, _settings.BlurRadius);
+            && FrostedBackdrop.ApplyImage(BackdropImage, _settings.BackgroundImagePath, Width, Height, _settings.BlurRadius);
 
         if (!imageMode)
             BackdropImage.Source = null;
@@ -478,6 +463,53 @@ public partial class SettingsWindow : Window
     }
 
     private void Close_Click(object sender, RoutedEventArgs e) => Hide();
+
+    // ------------------------------------------------------------- 页签
+
+    private void Tab_Checked(object sender, RoutedEventArgs e)
+    {
+        if (GeneralPanel is null)
+            return;
+
+        int index = sender is RadioButton { Tag: string tag } && int.TryParse(tag, out int value)
+            ? value
+            : 0;
+        SelectTab(index);
+    }
+
+    public void SelectTab(int index)
+    {
+        if (GeneralPanel is null)
+            return;
+
+        GeneralPanel.Visibility = index == 0 ? Visibility.Visible : Visibility.Collapsed;
+        GesturePanel.Visibility = index == 1 ? Visibility.Visible : Visibility.Collapsed;
+        AudioPanel.Visibility = index == 2 ? Visibility.Visible : Visibility.Collapsed;
+        AboutPanel.Visibility = index == 3 ? Visibility.Visible : Visibility.Collapsed;
+
+        RadioButton tab = index switch
+        {
+            1 => GestureTab,
+            2 => AudioTab,
+            3 => AboutTab,
+            _ => GeneralTab,
+        };
+        if (tab.IsChecked != true)
+            tab.IsChecked = true;
+
+        ContentScroller.ScrollToTop();
+    }
+
+    private void TouchSide_Checked(object sender, RoutedEventArgs e)
+    {
+        if (LeftTouchCard is null)
+            return;
+
+        bool left = LeftSideChip.IsChecked == true;
+        LeftTouchCard.Visibility = left ? Visibility.Visible : Visibility.Collapsed;
+        RightTouchCard.Visibility = left ? Visibility.Collapsed : Visibility.Visible;
+        TouchSideLabel.Text = left ? "左耳触控" : "右耳触控";
+    }
 
     // ------------------------------------------------------------- 热键
 
@@ -558,19 +590,20 @@ public partial class SettingsWindow : Window
 
         _settings.LowBatteryNotify = LowBatteryBox.IsChecked == true;
         _settings.Save();
-        ThresholdBox.IsEnabled = _settings.LowBatteryNotify;
+        ThresholdSlider.IsEnabled = _settings.LowBatteryNotify;
     }
 
-    private void Threshold_Changed(object sender, SelectionChangedEventArgs e)
+    private void Threshold_Changed(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        if (_loading || ThresholdBox.SelectedItem is not ComboBoxItem item)
+        int value = (int)Math.Round(e.NewValue);
+        if (ThresholdValueText is not null)
+            ThresholdValueText.Text = $"{value}%";
+
+        if (_loading)
             return;
 
-        if (item.Tag is string tag && int.TryParse(tag, out int value))
-        {
-            _settings.LowBatteryThreshold = value;
-            _settings.Save();
-        }
+        _settings.LowBatteryThreshold = value;
+        _settings.Save();
     }
 
     private void SelectIdleDisconnect(int minutes)
@@ -656,9 +689,32 @@ public partial class SettingsWindow : Window
         }
     }
 
-    /// <summary>调试用：把设置页渲染成 PNG。</summary>
-    public void SaveSnapshot(string path)
+    /// <summary>调试用：把设置页的四个页签分别渲染成 PNG。</summary>
+    public void SaveSnapshotTabs(string path)
     {
+        string directory = System.IO.Path.GetDirectoryName(path) ?? ".";
+        string name = System.IO.Path.GetFileNameWithoutExtension(path);
+        string extension = System.IO.Path.GetExtension(path);
+        if (string.IsNullOrEmpty(extension))
+            extension = ".png";
+
+        string[] tabs = ["general", "gesture", "audio", "about"];
+        for (int i = 0; i < tabs.Length; i++)
+        {
+            SelectTab(i);
+            UpdateLayout();
+            SaveSnapshot(System.IO.Path.Combine(directory, $"{name}-{tabs[i]}{extension}"));
+        }
+
+        SelectTab(0);
+    }
+
+    /// <summary>调试用：把设置页渲染成 PNG。</summary>
+    public void SaveSnapshot(string path, int tab = -1)
+    {
+        if (tab >= 0)
+            SelectTab(tab);
+
         UpdateLayout();
 
         double w = ActualWidth > 0 ? ActualWidth : Width;

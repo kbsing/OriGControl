@@ -14,20 +14,20 @@
         WindowStartupLocation="Manual"
         UseLayoutRounding="True">
 
-    <Border x:Name="HudCard" Background="#F21F2329" CornerRadius="12" Padding="16,10" Margin="14">
+    <Border x:Name="HudCard" Background="#F2181A17" CornerRadius="12" Padding="16,10" BorderBrush="#2C3029" BorderThickness="1" Margin="14">
         <Border.Effect>
             <DropShadowEffect BlurRadius="18" ShadowDepth="0" Opacity="0.35" Color="#000000" />
         </Border.Effect>
         <StackPanel Orientation="Horizontal">
             <TextBlock x:Name="GlyphText" Text="&#xE9D9;"
                        FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
-                       FontSize="19" Foreground="#8AB4FF"
+                       FontSize="19" Foreground="#C8F25A"
                        VerticalAlignment="Center" />
             <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
                 <TextBlock x:Name="TitleText" Text="降噪" FontSize="11"
-                           Foreground="#AEB6C2" />
+                           Foreground="#8C9183" />
                 <TextBlock x:Name="ValueText" Text="深度降噪" FontSize="14" FontWeight="SemiBold"
-                           Foreground="#FFFFFF" Margin="0,1,0,0" />
+                           Foreground="#ECEEE4" Margin="0,1,0,0" />
             </StackPanel>
         </StackPanel>
     </Border>
