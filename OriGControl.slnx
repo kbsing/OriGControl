@@ -6,4 +6,8 @@
     <Project Path="src/OriG.Protocol/OriG.Protocol.csproj" />
     <Project Path="src/OriG.Transport/OriG.Transport.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/OriG.Core.Tests/OriG.Core.Tests.csproj" />
+    <Project Path="tests/OriG.Protocol.Tests/OriG.Protocol.Tests.csproj" />
+  </Folder>
 </Solution>

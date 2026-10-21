@@ -19,8 +19,11 @@ internal sealed class HotkeyService : IDisposable
     [DllImport("user32.dll")]
     private static extern bool UnregisterHotKey(IntPtr hwnd, int id);
 
+    private const int ProbeId = 0x7FFF;
+
     private readonly HwndSource _source;
     private readonly Dictionary<int, Action> _handlers = [];
+    private readonly Dictionary<int, string> _gestures = [];
     private readonly List<int> _registered = [];
 
     public HotkeyService()
@@ -49,30 +52,58 @@ internal sealed class HotkeyService : IDisposable
     /// <summary>注册一个热键，返回是否成功（可能被其它程序占用）。</summary>
     public bool Register(int id, string gesture, Action action)
     {
-        Unregister(id);
+        if (string.IsNullOrWhiteSpace(gesture))
+        {
+            Unregister(id);
+            return false;
+        }
+
+        if (_registered.Contains(id)
+            && _gestures.TryGetValue(id, out string? current)
+            && string.Equals(current, gesture, StringComparison.OrdinalIgnoreCase))
+        {
+            _handlers[id] = action;
+            return true;
+        }
 
         if (!TryParse(gesture, out uint modifiers, out uint vk))
             return false;
 
-        if (!RegisterHotKey(_source.Handle, id, modifiers, vk))
+        // 先探测新组合是否空闲。若直接 Unregister 旧键再注册新键，
+        // 新键被占用时会把原本可用的热键也弄丢。
+        if (!IsGestureFree(modifiers, vk))
         {
             Log.Write($"热键注册失败：{gesture}（可能已被占用）");
             return false;
         }
 
+        Unregister(id);
+        if (!RegisterHotKey(_source.Handle, id, modifiers, vk))
+            return false;
+
         _handlers[id] = action;
+        _gestures[id] = gesture;
         _registered.Add(id);
         Log.Write($"热键已注册：{gesture} → id {id}");
+        return true;
+    }
+
+    private bool IsGestureFree(uint modifiers, uint vk)
+    {
+        if (!RegisterHotKey(_source.Handle, ProbeId, modifiers, vk))
+            return false;
+
+        UnregisterHotKey(_source.Handle, ProbeId);
         return true;
     }
 
     public void Unregister(int id)
     {
         if (_registered.Remove(id))
-        {
             UnregisterHotKey(_source.Handle, id);
-            _handlers.Remove(id);
-        }
+
+        _handlers.Remove(id);
+        _gestures.Remove(id);
     }
 
     // ---------------------------------------------------------------- 解析
@@ -162,6 +193,7 @@ internal sealed class HotkeyService : IDisposable
             UnregisterHotKey(_source.Handle, id);
         _registered.Clear();
         _handlers.Clear();
+        _gestures.Clear();
         _source.Dispose();
     }
 }

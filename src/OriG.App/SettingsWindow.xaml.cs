@@ -224,6 +224,7 @@ public partial class SettingsWindow : Window
                     }
                 }
                 combo.SelectedItem = match;
+                combo.IsEnabled = ready && binding is not null;
                 combo.ToolTip = binding is null
                     ? "未读取该触控项"
                     : $"协议值：{binding.Value.Side:X2} {binding.Value.Enabled:X2} {binding.Value.Gesture:X2} {binding.Value.Action:X2}";
@@ -417,15 +418,21 @@ public partial class SettingsWindow : Window
 
     public void ShowNear(Window owner)
     {
+        Rect area = ScreenWorkArea.ForWindow(owner);
+
         Width = 460;
-        Height = Math.Min(620, Math.Max(420, SystemParameters.WorkArea.Height - 40));
+        Height = Math.Min(620, Math.Max(420, area.Height - 40));
 
         double left = owner.Left - Width - 10;
-        if (left < 0)
+        if (left < area.Left)
             left = owner.Left + owner.ActualWidth + 10;
+        if (left + Width > area.Right)
+            left = Math.Max(area.Left + 10, area.Right - Width - 10);
 
         Left = left;
-        Top = Math.Max(0, owner.Top + owner.ActualHeight - Height);
+        Top = Math.Min(
+            Math.Max(area.Top + 10, owner.Top + owner.ActualHeight - Height),
+            area.Bottom - Height - 10);
 
         bool imageMode = HasBackgroundImage
             && FrostedBackdrop.ApplyImage(BackdropImage, _settings.BackgroundImagePath, Width, Height, _settings.BlurRadius);

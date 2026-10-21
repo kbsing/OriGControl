@@ -157,9 +157,13 @@ internal sealed class Session : IAsyncDisposable
                 : $"ACK {FrameCodec.Hex(f.Parameters)}",
             OpCodes.Query104 => CodecProtocol.Describe(f[0]),
             OpCodes.Query10A => TouchConfig.AncCycleText(f.Parameters),
-            OpCodes.GameModeQuery or OpCodes.LowLatencyQuery or OpCodes.DualConnQuery
-                or OpCodes.InEarQuery or OpCodes.WindQuery => f.IsOn(0) ? "开" : "关",
-            OpCodes.Event204 => $"seq={f[0]}  值=0x{f[6]:X2}",
+            OpCodes.GameModeQuery or OpCodes.GameModeSet
+                or OpCodes.LowLatencyQuery or OpCodes.LowLatencySet
+                or OpCodes.DualConnQuery or OpCodes.DualConnSet
+                or OpCodes.InEarQuery or OpCodes.InEarSet
+                or OpCodes.WindQuery or OpCodes.WindSet => f.IsOn(0) ? "开" : "关",
+            // 事件负载语义未解，原样打印，避免越界或把未知字段当成已知值。
+            OpCodes.Event204 => $"seq={f[0]}  数据={FrameCodec.Hex(f.Parameters)}",
             _ => FrameCodec.Hex(f.Parameters),
         };
         return (name, extra);

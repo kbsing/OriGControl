@@ -10,4 +10,7 @@
     <ProjectReference Include="..\OriG.Protocol\OriG.Protocol.csproj" />
     <ProjectReference Include="..\OriG.Transport\OriG.Transport.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="OriG.Core.Tests" />
+  </ItemGroup>
 </Project>

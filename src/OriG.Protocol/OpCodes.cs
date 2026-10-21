@@ -55,6 +55,17 @@ public static class OpCodes
         WindQuery, InEarQuery, Query10A,
     ];
 
+    /// <summary>
+    /// 面板打开时的轻量刷新序列。固件与只读字段不会变，只查 UI 用得到的状态。
+    /// 间隔沿用 110ms，避免连续下发过快。
+    /// </summary>
+    public static readonly ushort[] Refresh =
+    [
+        Battery, AncQuery, Query102, Query104, ConfigRead,
+        DualConnQuery, LowLatencyQuery, EqQuery, GameModeQuery,
+        WindQuery, InEarQuery, Query10A,
+    ];
+
     public static string Name(ushort op) => op switch
     {
         Query1 => "查询1",

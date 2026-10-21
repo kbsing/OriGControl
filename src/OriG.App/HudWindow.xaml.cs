@@ -47,9 +47,9 @@ public partial class HudWindow : Window
 
     private void Position()
     {
-        Rect area = SystemParameters.WorkArea;
-        Left = area.Right - ActualWidth - 24;
-        Top = area.Bottom - ActualHeight - 28;
+        Rect area = ScreenWorkArea.ForCursor(this);
+        Left = Math.Max(area.Left + 12, area.Right - ActualWidth - 24);
+        Top = Math.Max(area.Top + 12, area.Bottom - ActualHeight - 28);
     }
 
     private void FadeOut()

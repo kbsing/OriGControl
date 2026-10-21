@@ -44,33 +44,60 @@ public static class HeadsetServiceLocator
         var list = new List<HeadsetServiceInfo>();
         foreach (var device in devices)
         {
-            using var service = await RfcommDeviceService.FromIdAsync(device.Id);
-            if (service is null)
-                continue;
+            try
+            {
+                using var service = await RfcommDeviceService.FromIdAsync(device.Id);
+                if (service is null)
+                    continue;
 
-            list.Add(new HeadsetServiceInfo(
-                device.Id,
-                device.Name,
-                service.ConnectionHostName.ToString(),
-                service.ConnectionServiceName,
-                service.MaxProtectionLevel));
+                list.Add(new HeadsetServiceInfo(
+                    device.Id,
+                    device.Name,
+                    service.ConnectionHostName.ToString(),
+                    service.ConnectionServiceName,
+                    service.MaxProtectionLevel));
+            }
+            catch
+            {
+                // 个别设备/服务取不到信息时跳过，不能因此让整个枚举失败。
+            }
         }
         return list;
     }
 
-    /// <summary>按名称前缀挑目标；都没命中时，若只有一个服务就直接用它。</summary>
-    public static HeadsetServiceInfo? PickTarget(IReadOnlyList<HeadsetServiceInfo> services)
+    /// <summary>
+    /// 按名称前缀挑目标；名称都没命中时回退到上次成功连接的设备，
+    /// 最后若只有一个服务就直接用它。
+    /// </summary>
+    public static HeadsetServiceInfo? PickTarget(
+        IReadOnlyList<HeadsetServiceInfo> services, string? preferredDeviceId = null)
     {
+        HeadsetServiceInfo? preferred = null;
+        if (!string.IsNullOrWhiteSpace(preferredDeviceId))
+        {
+            preferred = services.FirstOrDefault(s =>
+                string.Equals(s.DeviceId, preferredDeviceId, StringComparison.OrdinalIgnoreCase));
+        }
+
+        // 多个同品牌耳机时，上次成功连接的那台优先；但重命名过的设备
+        // 仍要给仍使用已知名称的设备让路。
+        if (preferred is not null && IsKnownName(preferred.DisplayName))
+            return preferred;
+
         foreach (var s in services)
         {
-            foreach (var hint in NameHints)
-            {
-                if (s.DisplayName.StartsWith(hint, StringComparison.OrdinalIgnoreCase))
-                    return s;
-            }
+            if (IsKnownName(s.DisplayName))
+                return s;
         }
+
+        if (preferred is not null)
+            return preferred;
+
         return services.Count == 1 ? services[0] : null;
     }
+
+    private static bool IsKnownName(string name) =>
+        NameHints.Any(hint => name.StartsWith(hint, StringComparison.OrdinalIgnoreCase));
 
     public static async Task<IReadOnlyList<PairedDeviceInfo>> ListPairedAsync(CancellationToken ct = default)
     {

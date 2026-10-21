@@ -70,6 +70,10 @@ public partial class TrayWindow : Window
     private DateTime _shownAt = DateTime.MinValue;
     private readonly System.Windows.Threading.DispatcherTimer _reconnectTimer = new();
     private readonly System.Windows.Threading.DispatcherTimer _idleTimer = new();
+    private readonly System.Windows.Threading.DispatcherTimer _pollTimer = new()
+    {
+        Interval = TimeSpan.FromSeconds(30),
+    };
     private int _reconnectAttempt;
     private bool _idleDisconnected;
     private HudWindow? _hud;
@@ -83,6 +87,7 @@ public partial class TrayWindow : Window
     public TrayWindow(AppSettings settings)
     {
         _settings = settings;
+        _session.PreferredDeviceId = settings.LastDeviceId;
         InitializeComponent();
         BuildControls();
 
@@ -93,7 +98,7 @@ public partial class TrayWindow : Window
 
         _reconnectTimer.Tick += ReconnectTimer_Tick;
         _idleTimer.Tick += IdleTimer_Tick;
-
+        _pollTimer.Tick += PollTimer_Tick;
 
         ApplyStatus();
     }
@@ -249,6 +254,12 @@ public partial class TrayWindow : Window
             if (ok)
             {
                 HintText.Text = "";
+                if (!string.IsNullOrWhiteSpace(_session.DeviceId)
+                    && !string.Equals(_settings.LastDeviceId, _session.DeviceId, StringComparison.OrdinalIgnoreCase))
+                {
+                    _settings.LastDeviceId = _session.DeviceId;
+                    _settings.Save();
+                }
             }
             else
             {
@@ -273,6 +284,7 @@ public partial class TrayWindow : Window
     public void ShowNearTray(bool activate = true)
     {
         _idleTimer.Stop();
+        _pollTimer.Start();
         _ = EnsureConnectedAsync();
 
         // 1. 不显示窗口，先量出内容高度（Measure 不渲染，不会把自己抓进背景）
@@ -283,10 +295,10 @@ public partial class TrayWindow : Window
             contentHeight = 460;
         Height = contentHeight;
 
-        // 2. 贴右下角
-        var area = SystemParameters.WorkArea;
-        Left = area.Right - Width - 12;
-        Top = area.Bottom - contentHeight - 12;
+        // 2. 贴鼠标所在屏幕的右下角，多屏时不要总跑回主屏
+        Rect area = ScreenWorkArea.ForCursor(this);
+        Left = Math.Max(area.Left + 12, area.Right - Width - 12);
+        Top = Math.Max(area.Top + 12, area.Bottom - contentHeight - 12);
 
         // 3. 背景来源：自定义图片 > 纯色
         bool imageMode = HasBackgroundImage
@@ -302,24 +314,30 @@ public partial class TrayWindow : Window
             RootCard.Background = Brushes.Transparent;
 
         // 4. 显示
+        // 先记时间再 Show：Show/Activate 期间可能同步触发 Deactivated，
+        // 若这时 _shownAt 还是旧值，窗口会被误判为“用户点了别处”而立刻隐藏。
+        _shownAt = DateTime.UtcNow;
         ShowActivated = activate;
         Opacity = 1;
         Show();
-
-        _shownAt = DateTime.UtcNow;
 
         if (activate)
         {
             Activate();
             Focus();
         }
+
+        Log.Write($"面板显示：Visible={IsVisible} 位置={Left:0},{Top:0} 大小={Width:0}x{Height:0}");
     }
 
     public void HidePanel()
     {
         Hide();
         if (_settingsWindow is not { IsVisible: true })
+        {
+            _pollTimer.Stop();
             ArmIdleTimer();
+        }
     }
 
     // ------------------------------------------------------------- 自动重连 / 闲置断开
@@ -341,6 +359,23 @@ public partial class TrayWindow : Window
             HintText.Text = _session.Status == SessionStatus.Faulted
                 ? "连接失败，将自动重试…"
                 : "连接已断开，正在自动重连…";
+    }
+
+    /// <summary>
+    /// 面板/设置页可见时周期性拉一次状态。耳机不会把所有变更都主动推送过来，
+    /// 例如在手机上改了降噪，PC 界面需要靠这一轮查询才能跟上。
+    /// </summary>
+    private async void PollTimer_Tick(object? sender, EventArgs e)
+    {
+        if (IsExiting || ProbeMode || MockReady)
+            return;
+        if (!IsVisible && _settingsWindow is not { IsVisible: true })
+            return;
+        if (_session.Status != SessionStatus.Ready)
+            return;
+
+        await _session.RefreshAsync();
+        ApplyState();
     }
 
     private void ReconnectTimer_Tick(object? sender, EventArgs e)
@@ -771,6 +806,7 @@ public partial class TrayWindow : Window
     public void OpenSettings()
     {
         _idleTimer.Stop();
+        _pollTimer.Start();
         _ = EnsureConnectedAsync();
 
         if (_settingsWindow is null || !_settingsWindow.IsLoaded)
@@ -784,7 +820,10 @@ public partial class TrayWindow : Window
             {
                 _settingsWindow = null;
                 if (!IsVisible)
+                {
+                    _pollTimer.Stop();
                     ArmIdleTimer();
+                }
             };
         }
 
@@ -857,6 +896,7 @@ public partial class TrayWindow : Window
         IsExiting = true;
         _reconnectTimer.Stop();
         _idleTimer.Stop();
+        _pollTimer.Stop();
         _hud?.Close();
         _hud = null;
         if (_finding)

@@ -2,6 +2,7 @@ namespace OriG.App;
 
 using System.Threading;
 using System.Windows;
+using System.Windows.Threading;
 using Microsoft.Win32;
 using WinForms = System.Windows.Forms;
 
@@ -11,7 +12,11 @@ public partial class App : Application
     private const int HotkeyCycleEq = 2;
     private const int HotkeyTogglePanel = 3;
 
+    private const string ShowPanelEventName = @"Local\OriGControl.ShowPanel";
+
     private Mutex? _mutex;
+    private EventWaitHandle? _showPanelEvent;
+    private RegisteredWaitHandle? _showPanelWait;
     private WinForms.NotifyIcon? _tray;
     private TrayWindow? _window;
     private HotkeyService? _hotkeys;
@@ -24,11 +29,32 @@ public partial class App : Application
         _mutex = new Mutex(true, @"Local\OriGControl.SingleInstance", out bool isNew);
         if (!isNew)
         {
+            // 第二次启动不再静默退出，通知已运行的实例把面板叫出来。
+            try
+            {
+                using var signal = EventWaitHandle.OpenExisting(ShowPanelEventName);
+                signal.Set();
+            }
+            catch (WaitHandleCannotBeOpenedException)
+            {
+                // 旧实例尚未完成初始化，忽略
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // 会话隔离或权限不同，忽略
+            }
+
             Shutdown();
             return;
         }
 
+        _showPanelEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShowPanelEventName);
         base.OnStartup(e);
+
+        // 托盘程序没有控制台，任何漏网异常都必须落日志，否则用户只看到图标消失。
+        DispatcherUnhandledException += OnDispatcherUnhandledException;
+        AppDomain.CurrentDomain.UnhandledException += OnDomainUnhandledException;
+        TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
 
         _settings = AppSettings.Load();
         ThemeManager.Apply(_settings.Theme);
@@ -39,6 +65,16 @@ public partial class App : Application
         _window = new TrayWindow(_settings);
         _window.HotkeysChanged += (_, _) => RegisterHotkeys();
         _window.Session.StateChanged += (_, _) => CheckLowBattery();
+
+        if (_showPanelEvent is not null)
+        {
+            _showPanelWait = ThreadPool.RegisterWaitForSingleObject(
+                _showPanelEvent,
+                OnShowPanelSignal,
+                null,
+                Timeout.Infinite,
+                executeOnlyOnce: false);
+        }
 
         SystemEvents.PowerModeChanged += OnPowerModeChanged;
 
@@ -360,6 +396,23 @@ public partial class App : Application
         _window.ShowNearTray();
     }
 
+    /// <summary>第二个实例启动时通过命名事件请求显示面板。</summary>
+    private void OnShowPanelSignal(object? state, bool timedOut)
+    {
+        if (timedOut)
+            return;
+
+        Log.Write("收到第二实例显示请求");
+        try
+        {
+            Dispatcher.BeginInvoke(() => _window?.ShowNearTray());
+        }
+        catch (InvalidOperationException)
+        {
+            // 正在退出，Dispatcher 已关闭
+        }
+    }
+
     private void OpenSettings()
     {
         if (_window is null)
@@ -379,10 +432,6 @@ public partial class App : Application
         _hotkeys ??= new HotkeyService();
         if (_window is null)
             return;
-
-        _hotkeys.Unregister(HotkeyCycleAnc);
-        _hotkeys.Unregister(HotkeyCycleEq);
-        _hotkeys.Unregister(HotkeyTogglePanel);
 
         BindHotkey(HotkeyCycleAnc, _settings.HotkeyCycleAnc, "Ctrl+Alt+A",
             ["Ctrl+Alt+A", "Ctrl+Alt+Q", "Ctrl+Shift+A", "Ctrl+Alt+9"],
@@ -410,12 +459,20 @@ public partial class App : Application
         if (_hotkeys is null)
             return;
 
-        if (!string.IsNullOrWhiteSpace(preferred) && _hotkeys.Register(id, preferred, action))
+        // 空字符串表示用户主动停用该热键，不应报警。
+        if (string.IsNullOrWhiteSpace(preferred))
+        {
+            _hotkeys.Unregister(id);
+            return;
+        }
+
+        if (_hotkeys.Register(id, preferred, action))
             return;
 
         if (!string.Equals(preferred, defaultGesture, StringComparison.OrdinalIgnoreCase))
         {
             Log.Write($"自定义热键 {preferred} 不可用，保持原样");
+            NotifyError("热键注册失败", $"{preferred} 未生效（可能被占用），请在设置中更换。");
             return;
         }
 
@@ -433,6 +490,7 @@ public partial class App : Application
         }
 
         Log.Write($"热键 {preferred} 及备选全部不可用");
+        NotifyError("热键全部不可用", $"默认组合 {preferred} 及备选均被占用，请在设置中手动指定。");
     }
 
     // ------------------------------------------------------------- 电源事件
@@ -510,9 +568,57 @@ public partial class App : Application
         Shutdown();
     }
 
+    // ------------------------------------------------------------- 异常兜底
+
+    private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
+    {
+        Log.Write($"UI 未处理异常：{e.Exception}");
+
+        // 内存/访问冲突之类的问题继续跑只会让状态更糟，交给系统结束进程。
+        if (e.Exception is OutOfMemoryException or AccessViolationException)
+            return;
+
+        NotifyError("界面遇到错误", e.Exception.Message);
+        e.Handled = true;
+    }
+
+    private void OnDomainUnhandledException(object sender, UnhandledExceptionEventArgs e)
+    {
+        Log.Write($"进程未处理异常：{e.ExceptionObject}");
+        NotifyError("程序遇到错误", (e.ExceptionObject as Exception)?.Message ?? "未知错误");
+    }
+
+    private void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
+    {
+        Log.Write($"后台任务未观察异常：{e.Exception}");
+        e.SetObserved();
+    }
+
+    private void NotifyError(string title, string message)
+    {
+        if (_isProbeRun)
+            return;
+
+        try
+        {
+            _tray?.ShowBalloonTip(5000, title, message, WinForms.ToolTipIcon.Error);
+        }
+        catch
+        {
+            // 通知失败不能再抛异常
+        }
+    }
+
     protected override void OnExit(ExitEventArgs e)
     {
+        DispatcherUnhandledException -= OnDispatcherUnhandledException;
+        AppDomain.CurrentDomain.UnhandledException -= OnDomainUnhandledException;
+        TaskScheduler.UnobservedTaskException -= OnUnobservedTaskException;
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+        _showPanelWait?.Unregister(null);
+        _showPanelWait = null;
+        _showPanelEvent?.Dispose();
+        _showPanelEvent = null;
         _tray?.Dispose();
         _hotkeys?.Dispose();
         _mutex?.Dispose();

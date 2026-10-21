@@ -29,6 +29,7 @@ public enum Toggle
 public sealed class HeadsetSession : IAsyncDisposable
 {
     private readonly IHeadsetTransport _transport;
+    private readonly Func<CancellationToken, Task<IReadOnlyList<HeadsetServiceInfo>>> _findServices;
     private readonly StreamDecoder _decoder = new();
 
     /// <summary>RFCOMM 写操作不线程安全，所有下发命令都必须经过这把锁。</summary>
@@ -41,15 +42,37 @@ public sealed class HeadsetSession : IAsyncDisposable
 
     private Task? _pump;
 
+    /// <summary>握手期间收到的有效帧数量。为 0 说明链路只是“看起来连上了”。</summary>
+    private int _receivedFrames;
+
     public HeadsetState State { get; } = new();
     public SessionStatus Status { get; private set; } = SessionStatus.Disconnected;
     public string? LastError { get; private set; }
     public string DeviceName { get; private set; } = "";
+    public string DeviceId { get; private set; } = "";
+
+    /// <summary>上次成功连接的设备 ID；名称不匹配时优先选它。</summary>
+    public string? PreferredDeviceId { get; set; }
 
     public event EventHandler? StateChanged;
     public event EventHandler? StatusChanged;
 
-    public HeadsetSession(IHeadsetTransport transport) => _transport = transport;
+    public HeadsetSession(IHeadsetTransport transport) : this(transport, null)
+    {
+    }
+
+    internal HeadsetSession(IHeadsetTransport transport,
+        Func<CancellationToken, Task<IReadOnlyList<HeadsetServiceInfo>>>? findServices)
+    {
+        _transport = transport;
+        _findServices = findServices ?? (ct => HeadsetServiceLocator.FindAsync(ct: ct));
+    }
+
+    /// <summary>握手/刷新时相邻 QUERY 的间隔，测试可缩短。</summary>
+    internal TimeSpan QueryGap { get; init; } = TimeSpan.FromMilliseconds(110);
+
+    /// <summary>最后一条握手查询后等待回帧的时间。</summary>
+    internal TimeSpan HandshakeSettleDelay { get; init; } = TimeSpan.FromMilliseconds(300);
 
     public static HeadsetSession CreateDefault() => new(new WinRtRfcommTransport());
 
@@ -74,26 +97,34 @@ public sealed class HeadsetSession : IAsyncDisposable
 
             try
             {
-                var services = await HeadsetServiceLocator.FindAsync(ct: ct);
+                var services = await _findServices(ct);
                 if (services.Count == 0)
                     return Fail("未找到耳机。请先在 Windows 设置里配对。");
 
-                var service = HeadsetServiceLocator.PickTarget(services);
+                var service = HeadsetServiceLocator.PickTarget(services, PreferredDeviceId);
                 if (service is null)
                     return Fail("找到多个候选设备，但名称都不匹配。");
 
-                // 预检：设备没连上时 WinRT 会卡十几秒才超时，先给个明确提示
-                var paired = await HeadsetServiceLocator.ListPairedAsync(ct);
-                var match = paired.FirstOrDefault(p =>
-                    string.Equals(p.Name, service.DisplayName, StringComparison.OrdinalIgnoreCase));
-                if (match is not null && !match.Connected)
-                    return Fail("耳机未连接（可能已关机、在充电仓里或不在范围内）");
+                // 不能用 BluetoothDevice.ConnectionStatus 做硬性预检：耳机只连着手机、
+                // 或 PC 侧 ACL 尚未建立时它可能报 false，但 RFCOMM 仍可正常连接。
+                using var connectTimeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                connectTimeout.CancelAfter(TimeSpan.FromSeconds(10));
+                try
+                {
+                    await _transport.ConnectAsync(service, connectTimeout.Token);
+                }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                {
+                    await StopSessionAsync();
+                    return Fail("连接超时。请确认耳机已开机、不在充电仓里且处于范围内。");
+                }
 
-                await _transport.ConnectAsync(service, ct);
                 DeviceName = service.DisplayName;
+                DeviceId = service.DeviceId;
 
                 // 上一会话可能在半帧处断开，缓冲里的残字节不能带进新链路。
                 _decoder.Reset();
+                Volatile.Write(ref _receivedFrames, 0);
 
                 SetStatus(SessionStatus.Handshaking);
                 _pump = PumpAsync(_cts.Token);
@@ -102,15 +133,22 @@ public sealed class HeadsetSession : IAsyncDisposable
                 foreach (var op in OpCodes.Handshake)
                 {
                     await _transport.WriteAsync(FrameCodec.Query(op), ct);
-                    await Task.Delay(110, ct);
+                    await Task.Delay(QueryGap, ct);
                 }
-                await Task.Delay(300, ct);
+                await Task.Delay(HandshakeSettleDelay, ct);
 
                 // 读线程在握手期间已经退出，说明链路并未真正建立。
                 if (_pump.IsCompleted)
                 {
                     await StopSessionAsync();
                     return Fail("握手期间连接已断开");
+                }
+
+                // 一条回帧都没有 = 耳机没有响应，不能对外宣称“已连接”。
+                if (Volatile.Read(ref _receivedFrames) == 0)
+                {
+                    await StopSessionAsync();
+                    return Fail("耳机未响应握手查询（可能已关机、在充电仓里或不在范围内）");
                 }
 
                 SetStatus(SessionStatus.Ready);
@@ -150,6 +188,45 @@ public sealed class HeadsetSession : IAsyncDisposable
         finally
         {
             _lifecycleGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// 重新拉取一轮 UI 可见状态。用于面板打开时，以及设备可能被其它客户端修改后的兜底。
+    /// 命令会经过写锁，不会与用户操作并发写 RFCOMM。
+    /// </summary>
+    public async Task RefreshAsync(CancellationToken ct = default)
+    {
+        if (Status != SessionStatus.Ready)
+            return;
+
+        bool entered = false;
+        try
+        {
+            await _writeGate.WaitAsync(ct);
+            entered = true;
+
+            foreach (ushort op in OpCodes.Refresh)
+            {
+                if (Status != SessionStatus.Ready)
+                    return;
+
+                await _transport.WriteAsync(FrameCodec.Query(op), ct);
+                await Task.Delay(QueryGap, ct);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // 面板关闭或程序退出，忽略
+        }
+        catch (Exception ex)
+        {
+            Fail($"刷新状态失败：{ex.Message}");
+        }
+        finally
+        {
+            if (entered)
+                _writeGate.Release();
         }
     }
 
@@ -207,7 +284,10 @@ public sealed class HeadsetSession : IAsyncDisposable
 
                 bool changed = false;
                 foreach (var frame in _decoder.Feed(buffer.AsSpan(0, read)))
+                {
+                    Interlocked.Increment(ref _receivedFrames);
                     changed |= State.Apply(frame);
+                }
 
                 if (changed)
                     StateChanged?.Invoke(this, EventArgs.Empty);

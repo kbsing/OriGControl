@@ -7,6 +7,20 @@ Windows 托盘小工具，用来控制 **原道 OriG in** 蓝牙耳机。
 
 ---
 
+## 下载
+
+从 [最新 Release](https://github.com/kbsing/OriGControl/releases/latest) 下载，两个版本功能完全一致，只有运行时打包方式不同：
+
+| 版本 | 文件 | 体积 | 需要 .NET 10 Desktop Runtime | 适用场景 |
+|---|---|---:|---|---|
+| 便携版（推荐） | `OriGControl-v0.1.0-win-x64.exe` | 约 73MB | 否 | 新机器、离线机器、不想装运行时 |
+| Lite 版 | `OriGControl-v0.1.0-lite-win-x64.exe` | 约 25MB | 是 | 已安装 .NET 10 桌面运行时，想减少磁盘占用 |
+
+便携版首次启动会解压运行时，启动略慢；Lite 版依赖系统运行时，未安装时会提示缺少 .NET。
+两个 exe 均未签名，SmartScreen 可能提示。每个文件旁边都有对应的 `.sha256` 校验值。
+
+---
+
 ## 功能
 
 | 功能 | 状态 |
@@ -46,8 +60,8 @@ Windows 托盘小工具，用来控制 **原道 OriG in** 蓝牙耳机。
 ## 环境要求
 
 - Windows 10 2004（Build 19041）或更高版本 / Windows 11
-- [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0)（运行）
-- .NET 10 SDK（构建）
+- 自包含发布包无需安装 .NET；lite 包需要 .NET 10 Desktop Runtime
+- 从源码构建需要 .NET 10 SDK
 - 耳机已与电脑完成**经典蓝牙配对**
 - 仅支持 Windows，不支持 Linux / macOS
 
@@ -57,19 +71,40 @@ Windows 托盘小工具，用来控制 **原道 OriG in** 蓝牙耳机。
 
 ```powershell
 dotnet build -c Release
+dotnet test tests\OriG.Core.Tests\OriG.Core.Tests.csproj
+dotnet test tests\OriG.Protocol.Tests\OriG.Protocol.Tests.csproj
 .\src\OriG.App\bin\Release\net10.0-windows10.0.19041.0\OriGControl.exe
 ```
 
-发布为单文件（框架依赖，需要目标机器安装 .NET 10 桌面运行时）：
+发布为自包含单文件（目标机器无需安装 .NET）：
 
 ```powershell
 dotnet publish .\src\OriG.App\OriG.App.csproj -c Release -r win-x64 `
-  -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish
+  --self-contained true `
+  -p:PublishSingleFile=true `
+  -p:EnableCompressionInSingleFile=true `
+  -p:IncludeNativeLibrariesForSelfExtract=true `
+  -o publish
+```
+
+产物为 `publish/OriGControl.exe`（约 73MB），可直接分发的压缩包与校验值为
+`publish/OriGControl-win-x64.zip`（约 67MB）、`publish/OriGControl-win-x64.zip.sha256`。
+发布默认只保留 `zh-Hans` 卫星资源，避免把十几份用不到的本地化资源打进包里。
+
+体积敏感时可发布框架依赖 lite 版（约 25MB，zip 约 6MB，需要 .NET 10 Desktop Runtime）：
+
+```powershell
+dotnet publish .\src\OriG.App\OriG.App.csproj -c Release -r win-x64 `
+  --self-contained false `
+  -p:PublishSingleFile=true `
+  -p:DebugType=None -p:DebugSymbols=false `
+  -o publish\lite
 ```
 
 启动后**没有主窗口**，只驻留系统托盘：
 
 - **左键单击托盘图标**：打开 / 关闭控制面板
+- **再次启动程序**：不会重复驻留，而是唤出已运行实例的面板
 - **右键单击**：打开面板、设置、重新连接、退出
 - **面板左下角「设置」**：
   - 通用：全局热键、开机自启、闲置断开、低电量提醒、电量样式、明暗主题、背景图片与模糊程度
@@ -191,6 +226,10 @@ tools/
 - **RFCOMM 独占**：同一时刻只能有一个程序占用 SPP。实测手机与电脑同时连接、
   甚至手机官方 App 持有 SPP 时，PC 控制仍可共存。
 - **仅实测一款耳机**：`YUANDAO OriG in` 固件 4.08；同协议族的其它型号未经验证。
+- **传输仅有 T1**：当前只实现 WinRT RFCOMM；Winsock / 指定通道兜底尚未实现。
+- **查找耳机计时**：UI 仍按 10 秒保护性停止，耳机端实际自动停止时间未标定。
+- **多屏/混合 DPI**：窗口已跟随鼠标或拥有者所在屏幕，但混合 DPI 组合仍需实机验证。
+- **未签名**：发布包没有代码签名，首次运行可能触发 SmartScreen 提示。
 
 ---
 

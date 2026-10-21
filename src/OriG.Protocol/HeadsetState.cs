@@ -69,7 +69,9 @@ public sealed class HeadsetState
                 return true;
             }
 
-            case OpCodes.AncQuery:
+            // SET 回显同样携带最新值：既可能是耳机对本地命令的确认，也可能是
+            // 其它客户端（例如手机 App）改设置后广播过来的状态。
+            case OpCodes.AncQuery or OpCodes.AncSet:
             {
                 int v = f[0];
                 if (_anc == v)
@@ -79,7 +81,7 @@ public sealed class HeadsetState
                 return true;
             }
 
-            case OpCodes.EqQuery:
+            case OpCodes.EqQuery or OpCodes.EqSet:
             {
                 int v = f[0];
                 if (_eq == v)
@@ -99,15 +101,15 @@ public sealed class HeadsetState
                 return true;
             }
 
-            case OpCodes.GameModeQuery:
+            case OpCodes.GameModeQuery or OpCodes.GameModeSet:
                 return SetBool(ref _gameMode, f.IsOn(0), v => GameMode = v);
-            case OpCodes.LowLatencyQuery:
+            case OpCodes.LowLatencyQuery or OpCodes.LowLatencySet:
                 return SetBool(ref _lowLatency, f.IsOn(0), v => LowLatency = v);
-            case OpCodes.DualConnQuery:
+            case OpCodes.DualConnQuery or OpCodes.DualConnSet:
                 return SetBool(ref _dualConn, f.IsOn(0), v => DualConn = v);
-            case OpCodes.InEarQuery:
+            case OpCodes.InEarQuery or OpCodes.InEarSet:
                 return SetBool(ref _inEar, f.IsOn(0), v => InEar = v);
-            case OpCodes.WindQuery:
+            case OpCodes.WindQuery or OpCodes.WindSet:
                 return SetBool(ref _wind, f.IsOn(0), v => Wind = v);
 
             case OpCodes.Query1:
@@ -121,7 +123,7 @@ public sealed class HeadsetState
             case OpCodes.ConfigRead:
                 return SetBytes(ref _configTable, f.Parameters, v => ConfigTable = v);
 
-            case OpCodes.Query102:
+            case OpCodes.Query102 or OpCodes.Set202:
             {
                 int v = f[0];
                 if (_query102 == v)
@@ -160,15 +162,23 @@ public sealed class HeadsetState
         OpCodes.Battery => f.Parameters.Length >= 3,
         OpCodes.Firmware => f.Parameters.Length >= 2,
         OpCodes.AncQuery
+            or OpCodes.AncSet
             or OpCodes.EqQuery
+            or OpCodes.EqSet
             or OpCodes.Query102
+            or OpCodes.Set202
             or OpCodes.Query104
             or OpCodes.Event204
             or OpCodes.GameModeQuery
+            or OpCodes.GameModeSet
             or OpCodes.LowLatencyQuery
+            or OpCodes.LowLatencySet
             or OpCodes.DualConnQuery
+            or OpCodes.DualConnSet
             or OpCodes.InEarQuery
-            or OpCodes.WindQuery => f.Parameters.Length >= 1,
+            or OpCodes.InEarSet
+            or OpCodes.WindQuery
+            or OpCodes.WindSet => f.Parameters.Length >= 1,
         OpCodes.ConfigRead
             or OpCodes.Query1
             or OpCodes.Query4

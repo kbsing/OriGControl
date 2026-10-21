@@ -9,6 +9,7 @@
     <AssemblyName>OriGControl</AssemblyName>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\OriG.Protocol\OriG.Protocol.csproj" />

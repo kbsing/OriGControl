@@ -28,6 +28,9 @@ public sealed class AppSettings
     /// <summary>自定义背景图路径，用作磨砂底。为空则卡片为纯色底（主题色）。</summary>
     public string BackgroundImagePath { get; set; } = "";
 
+    /// <summary>上次成功连接的设备 ID。耳机改名或存在多个候选时用它兜底。</summary>
+    public string LastDeviceId { get; set; } = "";
+
     /// <summary>背景模糊半径（0 = 不模糊）。默认偏小，保证还能看出背景图内容。</summary>
     public double BlurRadius { get; set; } = 16;
 
@@ -71,7 +74,9 @@ public sealed class AppSettings
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(this, Options));
+            string temp = FilePath + ".tmp";
+            File.WriteAllText(temp, JsonSerializer.Serialize(this, Options));
+            File.Move(temp, FilePath, overwrite: true);
         }
         catch (Exception ex)
         {
