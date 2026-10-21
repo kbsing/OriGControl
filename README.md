@@ -239,6 +239,47 @@ tools/
 
 ---
 
+## 第三方许可与致谢
+
+本项目在协议调研与功能设计过程中参考了以下项目：
+
+- [ColorOS-Panel-For-OriG-in](https://github.com/gedo123/ColorOS-Panel-For-OriG-in)
+  — Copyright (c) 2026 gedo123，MIT License。
+
+为尊重原作者并避免许可歧义，现保留其 MIT 许可声明如下：
+
+<details>
+<summary>MIT License — ColorOS-Panel-For-OriG-in</summary>
+
+```text
+MIT License
+
+Copyright (c) 2026 gedo123
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+</details>
+
+---
+
 ## 许可
 
-[MIT](LICENSE)，仅覆盖本仓库代码。不包含任何厂商代码、固件或图片资源。
+本项目代码采用 [MIT](LICENSE)。第三方参考项目的许可见上节。
+不包含任何厂商代码、固件或图片资源。
